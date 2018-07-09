@@ -50,7 +50,7 @@ namespace CSVRender
             updateCellData(mData.getCells().getRecord(cellIndex));
         }
 
-        // Keep water existance/height up to date
+        // Keep water existence/height up to date
         QAbstractItemModel* cells = mData.getTableModel(CSMWorld::UniversalId::Type_Cells);
         connect(cells, SIGNAL(dataChanged(const QModelIndex&, const QModelIndex&)),
             this, SLOT(cellDataChanged(const QModelIndex&, const QModelIndex&)));
@@ -90,6 +90,11 @@ namespace CSVRender
         {
             recreate();
         }
+    }
+
+    void CellWater::reloadAssets()
+    {
+        recreate();
     }
 
     void CellWater::cellDataChanged(const QModelIndex& topLeft, const QModelIndex& bottomRight)

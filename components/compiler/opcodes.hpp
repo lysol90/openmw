@@ -200,6 +200,7 @@ namespace Compiler
     {
         const int opcodeXBox = 0x200000c;
         const int opcodeOnActivate = 0x200000d;
+        const int opcodeOnActivateExplicit = 0x2000306;
         const int opcodeActivate = 0x2000075;
         const int opcodeActivateExplicit = 0x2000244;
         const int opcodeLock = 0x20004;
@@ -292,6 +293,9 @@ namespace Compiler
         const int opcodeRemoveFromLevCreature = 0x20002fc;
         const int opcodeAddToLevItem = 0x20002fd;
         const int opcodeRemoveFromLevItem = 0x20002fe;
+        const int opcodeShowSceneGraph = 0x2002f;
+        const int opcodeShowSceneGraphExplicit = 0x20030;
+        const int opcodeToggleBorders = 0x2000307;
     }
 
     namespace Sky

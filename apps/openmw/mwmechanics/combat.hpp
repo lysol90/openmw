@@ -6,7 +6,8 @@
 namespace MWMechanics
 {
 
-bool applyOnStrikeEnchantment(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, const MWWorld::Ptr& object, const osg::Vec3f& hitPosition);
+bool applyOnStrikeEnchantment(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, const MWWorld::Ptr& object, const osg::Vec3f& hitPosition,
+                              const bool fromProjectile=false);
 
 /// @return can we block the attack?
 bool blockMeleeAttack (const MWWorld::Ptr& attacker, const MWWorld::Ptr& blocker, const MWWorld::Ptr& weapon, float damage, float attackStrength);
@@ -38,10 +39,7 @@ void getHandToHandDamage (const MWWorld::Ptr& attacker, const MWWorld::Ptr& vict
 /// Apply the fatigue loss incurred by attacking with the given weapon (weapon may be empty = hand-to-hand)
 void applyFatigueLoss(const MWWorld::Ptr& attacker, const MWWorld::Ptr& weapon, float attackStrength);
 
-/// Can attacker operate in victim's environment?
-/// e.g. If attacker is a fish, is victim in water? Or, if attacker can't swim, is victim on land?
-bool isEnvironmentCompatible(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim);
-
+float getFightDistanceBias(const MWWorld::Ptr& actor1, const MWWorld::Ptr& actor2);
 }
 
 #endif

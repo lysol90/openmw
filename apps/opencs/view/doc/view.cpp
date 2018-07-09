@@ -101,15 +101,39 @@ void CSVDoc::View::setupFileMenu()
     file->addAction(exit);
 }
 
+namespace
+{
+
+    void updateUndoRedoAction(QAction *action, const std::string &settingsKey)
+    {
+        QKeySequence seq;
+        CSMPrefs::State::get().getShortcutManager().getSequence(settingsKey, seq);
+        action->setShortcut(seq);
+    }
+
+}
+
+void CSVDoc::View::undoActionChanged()
+{
+    updateUndoRedoAction(mUndo, "document-edit-undo");
+}
+
+void CSVDoc::View::redoActionChanged()
+{
+    updateUndoRedoAction(mRedo, "document-edit-redo");
+}
+
 void CSVDoc::View::setupEditMenu()
 {
     QMenu *edit = menuBar()->addMenu (tr ("Edit"));
 
     mUndo = mDocument->getUndoStack().createUndoAction (this, tr("Undo"));
     setupShortcut("document-edit-undo", mUndo);
+    connect(mUndo, SIGNAL (changed ()), this, SLOT (undoActionChanged ()));
     edit->addAction (mUndo);
 
-    mRedo= mDocument->getUndoStack().createRedoAction (this, tr("Redo"));
+    mRedo = mDocument->getUndoStack().createRedoAction (this, tr("Redo"));
+    connect(mRedo, SIGNAL (changed ()), this, SLOT (redoActionChanged ()));
     setupShortcut("document-edit-redo", mRedo);
     edit->addAction (mRedo);
 
@@ -171,6 +195,16 @@ void CSVDoc::View::setupWorldMenu()
     connect (references, SIGNAL (triggered()), this, SLOT (addReferencesSubView()));
     setupShortcut("document-world-references", references);
     world->addAction (references);
+
+    QAction *lands = new QAction (tr ("Lands"), this);
+    connect (lands, SIGNAL (triggered()), this, SLOT (addLandsSubView()));
+    setupShortcut("document-world-lands", lands);
+    world->addAction (lands);
+
+    QAction *landTextures = new QAction (tr ("Land Textures"), this);
+    connect (landTextures, SIGNAL (triggered()), this, SLOT (addLandTexturesSubView()));
+    setupShortcut("document-world-landtextures", landTextures);
+    world->addAction (landTextures);
 
     QAction *grid = new QAction (tr ("Pathgrid"), this);
     connect (grid, SIGNAL (triggered()), this, SLOT (addPathgridSubView()));
@@ -283,6 +317,13 @@ void CSVDoc::View::setupCharacterMenu()
 void CSVDoc::View::setupAssetsMenu()
 {
     QMenu *assets = menuBar()->addMenu (tr ("Assets"));
+
+    QAction *reload = new QAction (tr ("Reload"), this);
+    connect (reload, SIGNAL (triggered()), &mDocument->getData(), SLOT (assetsChanged()));
+    setupShortcut("document-assets-reload", reload);
+    assets->addAction (reload);
+
+    assets->addSeparator();
 
     QAction *sounds = new QAction (tr ("Sounds"), this);
     connect (sounds, SIGNAL (triggered()), this, SLOT (addSoundsSubView()));
@@ -867,6 +908,16 @@ void CSVDoc::View::addDebugProfilesSubView()
 void CSVDoc::View::addRunLogSubView()
 {
     addSubView (CSMWorld::UniversalId::Type_RunLog);
+}
+
+void CSVDoc::View::addLandsSubView()
+{
+    addSubView (CSMWorld::UniversalId::Type_Lands);
+}
+
+void CSVDoc::View::addLandTexturesSubView()
+{
+    addSubView (CSMWorld::UniversalId::Type_LandTextures);
 }
 
 void CSVDoc::View::addPathgridSubView()

@@ -2,7 +2,7 @@
   OpenMW - The completely unofficial reimplementation of Morrowind
   Copyright (C) 2008-2010  Nicolay Korslund
   Email: < korslund@gmail.com >
-  WWW: http://openmw.sourceforge.net/
+  WWW: https://openmw.org/
 
   This file (controlled.h) is part of the OpenMW package.
 
@@ -17,7 +17,7 @@
 
   You should have received a copy of the GNU General Public License
   version 3 along with this program. If not, see
-  http://www.gnu.org/licenses/ .
+  https://www.gnu.org/licenses/ .
 
  */
 
@@ -109,6 +109,16 @@ public:
 
     osg::Vec3f mPlaneNormal;
     float mPlaneDistance;
+};
+
+class NiSphericalCollider : public Controlled
+{
+public:
+    float mBounceFactor;
+    float mRadius;
+    osg::Vec3f mCenter;
+
+    void read(NIFStream *nif);
 };
 
 class NiParticleRotation : public Controlled

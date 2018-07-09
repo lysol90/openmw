@@ -2,6 +2,8 @@
 
 #include <components/misc/stringops.hpp>
 
+#include "../prefs/state.hpp"
+
 #include "../world/record.hpp"
 #include "../world/universalid.hpp"
 
@@ -18,6 +20,7 @@ CSMTools::ReferenceableCheckStage::ReferenceableCheckStage(
     mScripts(scripts),
     mPlayerPresent(false)
 {
+    mIgnoreBaseRecords = false;
 }
 
 void CSMTools::ReferenceableCheckStage::perform (int stage, CSMDoc::Messages& messages)
@@ -228,6 +231,8 @@ void CSMTools::ReferenceableCheckStage::perform (int stage, CSMDoc::Messages& me
 int CSMTools::ReferenceableCheckStage::setup()
 {
     mPlayerPresent = false;
+    mIgnoreBaseRecords = CSMPrefs::get()["Reports"]["ignore-base-records"].isTrue();
+
     return mReferencables.getSize() + 1;
 }
 
@@ -238,10 +243,9 @@ void CSMTools::ReferenceableCheckStage::bookCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Book& book = (dynamic_cast<const CSMWorld::Record<ESM::Book>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Book, book.mId);
@@ -259,10 +263,9 @@ void CSMTools::ReferenceableCheckStage::activatorCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Activator& activator = (dynamic_cast<const CSMWorld::Record<ESM::Activator>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Activator, activator.mId);
@@ -282,10 +285,9 @@ void CSMTools::ReferenceableCheckStage::potionCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Potion& potion = (dynamic_cast<const CSMWorld::Record<ESM::Potion>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Potion, potion.mId);
@@ -305,10 +307,9 @@ void CSMTools::ReferenceableCheckStage::apparatusCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Apparatus& apparatus = (dynamic_cast<const CSMWorld::Record<ESM::Apparatus>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Apparatus, apparatus.mId);
@@ -328,10 +329,9 @@ void CSMTools::ReferenceableCheckStage::armorCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Armor& armor = (dynamic_cast<const CSMWorld::Record<ESM::Armor>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Armor, armor.mId);
@@ -357,10 +357,9 @@ void CSMTools::ReferenceableCheckStage::clothingCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Clothing& clothing = (dynamic_cast<const CSMWorld::Record<ESM::Clothing>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Clothing, clothing.mId);
@@ -377,10 +376,9 @@ void CSMTools::ReferenceableCheckStage::containerCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Container& container = (dynamic_cast<const CSMWorld::Record<ESM::Container>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Container, container.mId);
@@ -411,7 +409,8 @@ void CSMTools::ReferenceableCheckStage::creatureCheck (
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
 
     const ESM::Creature& creature = (dynamic_cast<const CSMWorld::Record<ESM::Creature>&>(baseRecord)).get();
@@ -425,7 +424,7 @@ void CSMTools::ReferenceableCheckStage::creatureCheck (
 
     //stats checks
     if (creature.mData.mLevel < 1)
-        messages.push_back (std::make_pair (id, creature.mId + " has non-postive level"));
+        messages.push_back (std::make_pair (id, creature.mId + " has non-positive level"));
 
     if (creature.mData.mStrength < 0)
         messages.push_back (std::make_pair (id, creature.mId + " has negative strength"));
@@ -487,7 +486,8 @@ void CSMTools::ReferenceableCheckStage::doorCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
 
     const ESM::Door& door = (dynamic_cast<const CSMWorld::Record<ESM::Door>&>(baseRecord)).get();
@@ -511,10 +511,9 @@ void CSMTools::ReferenceableCheckStage::ingredientCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Ingredient& ingredient = (dynamic_cast<const CSMWorld::Record<ESM::Ingredient>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Ingredient, ingredient.mId);
@@ -532,10 +531,9 @@ void CSMTools::ReferenceableCheckStage::creaturesLevListCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::CreatureLevList& CreatureLevList = (dynamic_cast<const CSMWorld::Record<ESM::CreatureLevList>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_CreatureLevelledList, CreatureLevList.mId); //CreatureLevList but Type_CreatureLevelledList :/
@@ -550,10 +548,9 @@ void CSMTools::ReferenceableCheckStage::itemLevelledListCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::ItemLevList& ItemLevList = (dynamic_cast<const CSMWorld::Record<ESM::ItemLevList>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_ItemLevelledList, ItemLevList.mId);
@@ -567,7 +564,8 @@ void CSMTools::ReferenceableCheckStage::lightCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
 
     const ESM::Light& light = (dynamic_cast<const CSMWorld::Record<ESM::Light>& >(baseRecord)).get();
@@ -577,12 +575,7 @@ void CSMTools::ReferenceableCheckStage::lightCheck(
         messages.push_back (std::make_pair (id, light.mId + " has negative light radius"));
 
     if (light.mData.mFlags & ESM::Light::Carry)
-    {
         inventoryItemCheck<ESM::Light>(light, messages, id.toString());
-
-        if (light.mData.mTime == 0)
-            messages.push_back (std::make_pair (id, light.mId + " has zero duration"));
-    }
 
     // Check that mentioned scripts exist
     scriptCheck<ESM::Light>(light, messages, id.toString());
@@ -595,10 +588,9 @@ void CSMTools::ReferenceableCheckStage::lockpickCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Lockpick& lockpick = (dynamic_cast<const CSMWorld::Record<ESM::Lockpick>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Lockpick, lockpick.mId);
@@ -618,10 +610,9 @@ void CSMTools::ReferenceableCheckStage::miscCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Miscellaneous& miscellaneous = (dynamic_cast<const CSMWorld::Record<ESM::Miscellaneous>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Miscellaneous, miscellaneous.mId);
@@ -644,55 +635,59 @@ void CSMTools::ReferenceableCheckStage::npcCheck (
     const ESM::NPC& npc = (dynamic_cast<const CSMWorld::Record<ESM::NPC>& >(baseRecord)).get();
     CSMWorld::UniversalId id (CSMWorld::UniversalId::Type_Npc, npc.mId);
 
-    short level(npc.mNpdt52.mLevel);
-    char disposition(npc.mNpdt52.mDisposition);
-    char reputation(npc.mNpdt52.mReputation);
-    char rank(npc.mNpdt52.mRank);
-    //Don't know what unknown is for
-    int gold(npc.mNpdt52.mGold);
-
     //Detect if player is present
     if (Misc::StringUtils::ciEqual(npc.mId, "player")) //Happy now, scrawl?
         mPlayerPresent = true;
+
+    // Skip "Base" records (setting!)
+    if (mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly)
+        return;
+
+    short level(npc.mNpdt.mLevel);
+    char disposition(npc.mNpdt.mDisposition);
+    char reputation(npc.mNpdt.mReputation);
+    char rank(npc.mNpdt.mRank);
+    //Don't know what unknown is for
+    int gold(npc.mNpdt.mGold);
 
     if (npc.mNpdtType == ESM::NPC::NPC_WITH_AUTOCALCULATED_STATS) //12 = autocalculated
     {
         if ((npc.mFlags & ESM::NPC::Autocalc) == 0) //0x0010 = autocalculated flag
         {
-            messages.push_back (std::make_pair (id, npc.mId + " mNpdtType or flags mismatch!")); //should not happend?
+            messages.push_back (std::make_pair (id, npc.mId + " mNpdtType or flags mismatch!")); //should not happen?
             return;
         }
 
-        level = npc.mNpdt12.mLevel;
-        disposition = npc.mNpdt12.mDisposition;
-        reputation = npc.mNpdt12.mReputation;
-        rank = npc.mNpdt12.mRank;
-        gold = npc.mNpdt12.mGold;
+        level = npc.mNpdt.mLevel;
+        disposition = npc.mNpdt.mDisposition;
+        reputation = npc.mNpdt.mReputation;
+        rank = npc.mNpdt.mRank;
+        gold = npc.mNpdt.mGold;
     }
     else
     {
-        if (npc.mNpdt52.mAgility == 0)
+        if (npc.mNpdt.mAgility == 0)
             messages.push_back (std::make_pair (id, npc.mId + " agility has zero value"));
 
-        if (npc.mNpdt52.mEndurance == 0)
+        if (npc.mNpdt.mEndurance == 0)
             messages.push_back (std::make_pair (id, npc.mId + " endurance has zero value"));
 
-        if (npc.mNpdt52.mIntelligence == 0)
+        if (npc.mNpdt.mIntelligence == 0)
             messages.push_back (std::make_pair (id, npc.mId + " intelligence has zero value"));
 
-        if (npc.mNpdt52.mLuck == 0)
+        if (npc.mNpdt.mLuck == 0)
             messages.push_back (std::make_pair (id, npc.mId + " luck has zero value"));
 
-        if (npc.mNpdt52.mPersonality == 0)
+        if (npc.mNpdt.mPersonality == 0)
             messages.push_back (std::make_pair (id, npc.mId + " personality has zero value"));
 
-        if (npc.mNpdt52.mStrength == 0)
+        if (npc.mNpdt.mStrength == 0)
             messages.push_back (std::make_pair (id, npc.mId + " strength has zero value"));
 
-        if (npc.mNpdt52.mSpeed == 0)
+        if (npc.mNpdt.mSpeed == 0)
             messages.push_back (std::make_pair (id, npc.mId + " speed has zero value"));
 
-        if (npc.mNpdt52.mWillpower == 0)
+        if (npc.mNpdt.mWillpower == 0)
             messages.push_back (std::make_pair (id, npc.mId + " willpower has zero value"));
     }
 
@@ -706,22 +701,14 @@ void CSMTools::ReferenceableCheckStage::npcCheck (
         messages.push_back (std::make_pair (id, npc.mId + " has any empty name"));
 
     if (npc.mClass.empty())
-    {
-        messages.push_back (std::make_pair (id, npc.mId + " has any empty class"));
-    }
+        messages.push_back (std::make_pair (id, npc.mId + " has an empty class"));
     else if (mClasses.searchId (npc.mClass) == -1)
-    {
         messages.push_back (std::make_pair (id, npc.mId + " has invalid class"));
-    }
 
     if (npc.mRace.empty())
-    {
-        messages.push_back (std::make_pair (id, npc.mId + " has any empty race"));
-    }
+        messages.push_back (std::make_pair (id, npc.mId + " has an empty race"));
     else if (mRaces.searchId (npc.mRace) == -1)
-    {
         messages.push_back (std::make_pair (id, npc.mId + " has invalid race"));
-    }
 
     if (disposition < 0)
         messages.push_back (std::make_pair (id, npc.mId + " has negative disposition"));
@@ -761,7 +748,8 @@ void CSMTools::ReferenceableCheckStage::weaponCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord (stage);
 
-    if (baseRecord.isDeleted())
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
 
     const ESM::Weapon& weapon = (dynamic_cast<const CSMWorld::Record<ESM::Weapon>& >(baseRecord)).get();
@@ -823,7 +811,7 @@ void CSMTools::ReferenceableCheckStage::weaponCheck(
         {
             //checking of health
             if (weapon.mData.mHealth <= 0)
-                messages.push_back (std::make_pair (id, weapon.mId + " has non-positivie health"));
+                messages.push_back (std::make_pair (id, weapon.mId + " has non-positive health"));
 
             if (weapon.mData.mReach < 0)
                 messages.push_back (std::make_pair (id, weapon.mId + " has negative reach"));
@@ -841,10 +829,9 @@ void CSMTools::ReferenceableCheckStage::probeCheck(
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord(stage);
 
-    if (baseRecord.isDeleted())
-    {
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
-    }
 
     const ESM::Probe& probe = (dynamic_cast<const CSMWorld::Record<ESM::Probe>& >(baseRecord)).get();
     CSMWorld::UniversalId id(CSMWorld::UniversalId::Type_Probe, probe.mId);
@@ -862,7 +849,8 @@ void CSMTools::ReferenceableCheckStage::repairCheck (
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord (stage);
 
-    if (baseRecord.isDeleted())
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
 
     const ESM::Repair& repair = (dynamic_cast<const CSMWorld::Record<ESM::Repair>& >(baseRecord)).get();
@@ -881,7 +869,8 @@ void CSMTools::ReferenceableCheckStage::staticCheck (
 {
     const CSMWorld::RecordBase& baseRecord = records.getRecord (stage);
 
-    if (baseRecord.isDeleted())
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && baseRecord.mState == CSMWorld::RecordBase::State_BaseOnly) || baseRecord.isDeleted())
         return;
 
     const ESM::Static& staticElement = (dynamic_cast<const CSMWorld::Record<ESM::Static>& >(baseRecord)).get();
@@ -915,7 +904,7 @@ void CSMTools::ReferenceableCheckStage::inventoryListCheck(
                 id + " contains non-existing item (" + itemName + ")"));
         else
         {
-            // Needs to accomodate Containers, Creatures, and NPCs
+            // Needs to accommodate containers, creatures, and NPCs
             switch (localIndex.second)
             {
             case CSMWorld::UniversalId::Type_Potion:

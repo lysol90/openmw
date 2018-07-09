@@ -137,6 +137,9 @@ namespace
                     iter->load (state);
                     return;
                 }
+
+            std::cerr << "Warning: Dropping reference to " << state.mRef.mRefID << " (invalid content file link)" << std::endl;
+            return;
         }
 
         // new reference
@@ -194,7 +197,7 @@ namespace MWWorld
         else
         {
             std::cerr
-                << "Error: could not resolve cell reference '" << ref.mRefID << "'"
+                << "Warning: could not resolve cell reference '" << ref.mRefID << "'"
                 << " (dropping reference)" << std::endl;
         }
     }
@@ -442,10 +445,6 @@ namespace MWWorld
             loadRefs ();
 
             mState = State_Loaded;
-
-            // TODO: the pathgrid graph only needs to be loaded for active cells, so move this somewhere else.
-            // In a simple test, loading the graph for all cells in MW + expansions took 200 ms
-            mPathgridGraph.load(this);
         }
     }
 
@@ -664,7 +663,7 @@ namespace MWWorld
 
             default:
                 std::cerr
-                    << "WARNING: Ignoring reference '" << ref.mRefID << "' of unhandled type\n";
+                    << "Error: Ignoring reference '" << ref.mRefID << "' of unhandled type\n";
                 return;
         }
 
@@ -678,7 +677,6 @@ namespace MWWorld
         if (mCell->mData.mFlags & ESM::Cell::Interior && mCell->mData.mFlags & ESM::Cell::HasWater)
             mWaterLevel = state.mWaterLevel;
 
-        mWaterLevel = state.mWaterLevel;
         mLastRespawn = MWWorld::TimeStamp(state.mLastRespawn);
     }
 
@@ -689,7 +687,6 @@ namespace MWWorld
         if (mCell->mData.mFlags & ESM::Cell::Interior && mCell->mData.mFlags & ESM::Cell::HasWater)
             state.mWaterLevel = mWaterLevel;
 
-        state.mWaterLevel = mWaterLevel;
         state.mHasFogOfWar = (mFogState.get() ? 1 : 0);
         state.mLastRespawn = mLastRespawn.toEsm();
     }
@@ -895,7 +892,7 @@ namespace MWWorld
 
             if (!visitor.mFound)
             {
-                std::cerr << "Dropping moved ref tag for " << refnum.mIndex << " (moved object no longer exists)" << std::endl;
+                std::cerr << "Warning: Dropping moved ref tag for " << refnum.mIndex << " (moved object no longer exists)" << std::endl;
                 continue;
             }
 
@@ -905,7 +902,7 @@ namespace MWWorld
 
             if (otherCell == NULL)
             {
-                std::cerr << "Dropping moved ref tag for " << movedRef->mRef.getRefId()
+                std::cerr << "Warning: Dropping moved ref tag for " << movedRef->mRef.getRefId()
                           << " (target cell " << movedTo.mWorldspace << " no longer exists). Reference moved back to its original location." << std::endl;
                 // Note by dropping tag the object will automatically re-appear in its original cell, though potentially at inapproriate coordinates.
                 // Restore original coordinates:
@@ -934,16 +931,6 @@ namespace MWWorld
         return !(left==right);
     }
 
-    bool CellStore::isPointConnected(const int start, const int end) const
-    {
-        return mPathgridGraph.isPointConnected(start, end);
-    }
-
-    std::list<ESM::Pathgrid::Point> CellStore::aStarSearch(const int start, const int end) const
-    {
-        return mPathgridGraph.aStarSearch(start, end);
-    }
-
     void CellStore::setFog(ESM::FogState *fog)
     {
         mFogState.reset(fog);
@@ -958,8 +945,13 @@ namespace MWWorld
     {
         const MWMechanics::CreatureStats& creatureStats = ptr.getClass().getCreatureStats(ptr);
         static const float fCorpseClearDelay = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fCorpseClearDelay")->getFloat();
-        if (creatureStats.isDead() && !ptr.getClass().isPersistent(ptr) && creatureStats.getTimeOfDeath() + fCorpseClearDelay <= MWBase::Environment::get().getWorld()->getTimeStamp())
+        if (creatureStats.isDead() &&
+            creatureStats.isDeathAnimationFinished() &&
+            !ptr.getClass().isPersistent(ptr) &&
+            creatureStats.getTimeOfDeath() + fCorpseClearDelay <= MWBase::Environment::get().getWorld()->getTimeStamp())
+        {
             MWBase::Environment::get().getWorld()->deleteObject(ptr);
+        }
     }
 
     void CellStore::respawn()

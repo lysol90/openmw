@@ -13,9 +13,6 @@
 #include <components/misc/resourcehelpers.hpp>
 #include <components/resource/imagemanager.hpp>
 
-// skel
-#include <osgAnimation/MorphGeometry>
-
 // particle
 #include <osgParticle/ParticleSystem>
 #include <osgParticle/ParticleSystemUpdater>
@@ -39,6 +36,7 @@
 #include <components/nif/effect.hpp>
 #include <components/sceneutil/skeleton.hpp>
 #include <components/sceneutil/riggeometry.hpp>
+#include <components/sceneutil/morphgeometry.hpp>
 
 #include "particle.hpp"
 #include "userdata.hpp"
@@ -83,35 +81,6 @@ namespace
             collectDrawableProperties(nifNode->parent, out);
     }
 
-    class FrameSwitch : public osg::Group
-    {
-    public:
-        FrameSwitch()
-        {
-        }
-
-        FrameSwitch(const FrameSwitch& copy, const osg::CopyOp& copyop)
-            : osg::Group(copy, copyop)
-        {
-        }
-
-        META_Object(NifOsg, FrameSwitch)
-
-        virtual void traverse(osg::NodeVisitor& nv)
-        {
-            if (nv.getTraversalMode() != osg::NodeVisitor::TRAVERSE_ACTIVE_CHILDREN && nv.getVisitorType() != osg::NodeVisitor::UPDATE_VISITOR)
-                osg::Group::traverse(nv);
-            else
-            {
-                for (unsigned int i=0; i<getNumChildren(); ++i)
-                {
-                    if (i%2 == nv.getTraversalNumber()%2)
-                        getChild(i)->accept(nv);
-                }
-            }
-        }
-    };
-
     // NodeCallback used to have a node always oriented towards the camera. The node can have translation and scale
     // set just like a regular MatrixTransform, but the rotation set will be overridden in order to face the camera.
     // Must be set as a cull callback.
@@ -152,70 +121,6 @@ namespace
 
             cv->popModelViewMatrix();
         }
-    };
-
-    struct UpdateMorphGeometry : public osg::Drawable::CullCallback
-    {
-        UpdateMorphGeometry()
-            : mLastFrameNumber(0)
-        {
-        }
-
-        UpdateMorphGeometry(const UpdateMorphGeometry& copy, const osg::CopyOp& copyop)
-            : osg::Drawable::CullCallback(copy, copyop)
-            , mLastFrameNumber(0)
-        {
-        }
-
-        META_Object(NifOsg, UpdateMorphGeometry)
-
-        virtual bool cull(osg::NodeVisitor* nv, osg::Drawable * drw, osg::State *) const
-        {
-            osgAnimation::MorphGeometry* geom = static_cast<osgAnimation::MorphGeometry*>(drw);
-            if (!geom)
-                return false;
-
-            if (mLastFrameNumber == nv->getTraversalNumber())
-                return false;
-            mLastFrameNumber = nv->getTraversalNumber();
-
-            geom->transformSoftwareMethod();
-            return false;
-        }
-
-    private:
-        mutable unsigned int mLastFrameNumber;
-    };
-
-    // Callback to return a static bounding box for a MorphGeometry. The idea is to not recalculate the bounding box
-    // every time the morph weights change. To do so we return a maximum containing box that is big enough for all possible combinations of morph targets.
-    class StaticBoundingBoxCallback : public osg::Drawable::ComputeBoundingBoxCallback
-    {
-    public:
-        StaticBoundingBoxCallback()
-        {
-        }
-
-        StaticBoundingBoxCallback(const osg::BoundingBox& bounds)
-            : mBoundingBox(bounds)
-        {
-        }
-
-        StaticBoundingBoxCallback(const StaticBoundingBoxCallback& copy, const osg::CopyOp& copyop)
-            : osg::Drawable::ComputeBoundingBoxCallback(copy, copyop)
-            , mBoundingBox(copy.mBoundingBox)
-        {
-        }
-
-        META_Object(NifOsg, StaticBoundingBoxCallback)
-
-        virtual osg::BoundingBox computeBound(const osg::Drawable&) const
-        {
-            return mBoundingBox;
-        }
-
-    private:
-        osg::BoundingBox mBoundingBox;
     };
 
     void extractTextKeys(const Nif::NiTextKeyExtraData *tk, NifOsg::TextKeyMap &textkeys)
@@ -334,7 +239,7 @@ namespace NifOsg
                     continue;
 
                 osg::ref_ptr<NifOsg::KeyframeController> callback(new NifOsg::KeyframeController(key->data.getPtr()));
-                callback->setFunction(boost::shared_ptr<NifOsg::ControllerFunction>(new NifOsg::ControllerFunction(key)));
+                callback->setFunction(std::shared_ptr<NifOsg::ControllerFunction>(new NifOsg::ControllerFunction(key)));
 
                 if (target.mKeyframeControllers.find(strdata->string) != target.mKeyframeControllers.end())
                     std::cerr << "Warning: controller " << strdata->string << " present more than once in " << nif->getFilename() << ", ignoring later version" << std::endl;
@@ -356,12 +261,23 @@ namespace NifOsg
 
             osg::ref_ptr<TextKeyMapHolder> textkeys (new TextKeyMapHolder);
 
-            osg::ref_ptr<osg::Node> created = handleNode(nifNode, NULL, imageManager, std::vector<int>(), 0, 0, false, &textkeys->mTextKeys);
+            osg::ref_ptr<osg::Node> created = handleNode(nifNode, NULL, imageManager, std::vector<int>(), 0, false, false, false, &textkeys->mTextKeys);
 
             if (nif->getUseSkinning())
             {
                 osg::ref_ptr<SceneUtil::Skeleton> skel = new SceneUtil::Skeleton;
-                skel->addChild(created);
+
+                osg::Group* root = created->asGroup();
+                if (root && root->getDataVariance() == osg::Object::STATIC && !root->asTransform())
+                {
+                    skel->setStateSet(root->getStateSet());
+                    skel->setName(root->getName());
+                    for (unsigned int i=0; i<root->getNumChildren(); ++i)
+                        skel->addChild(root->getChild(i));
+                    root->removeChildren(0, root->getNumChildren());
+                }
+                else
+                    skel->addChild(created);
                 created = skel;
             }
 
@@ -399,56 +315,9 @@ namespace NifOsg
         {
             bool autoPlay = animflags & Nif::NiNode::AnimFlag_AutoPlay;
             if (autoPlay)
-                toSetup->setSource(boost::shared_ptr<SceneUtil::ControllerSource>(new SceneUtil::FrameTimeSource));
+                toSetup->setSource(std::shared_ptr<SceneUtil::ControllerSource>(new SceneUtil::FrameTimeSource));
 
-            toSetup->setFunction(boost::shared_ptr<ControllerFunction>(new ControllerFunction(ctrl)));
-        }
-
-        void setupParticleController(const Nif::Controller* ctrl, SceneUtil::Controller* toSetup, int particleflags)
-        {
-            bool autoPlay = particleflags & Nif::NiNode::ParticleFlag_AutoPlay;
-            if (autoPlay)
-                toSetup->setSource(boost::shared_ptr<SceneUtil::ControllerSource>(new SceneUtil::FrameTimeSource));
-
-            toSetup->setFunction(boost::shared_ptr<ControllerFunction>(new ControllerFunction(ctrl)));
-        }
-
-        void optimize (const Nif::Node* nifNode, osg::Group* node, bool skipMeshes)
-        {
-            // For nodes with an identity transform, remove the redundant Transform node
-            if (node->getDataVariance() == osg::Object::STATIC
-                    // For TriShapes, we can only collapse the node, but not completely remove it,
-                    // if the link to animated collision shapes is supposed to stay intact.
-                    && (nifNode->recType != Nif::RC_NiTriShape || !skipMeshes)
-                    // Don't optimize drawables with controllers, that creates issues when we want to deep copy controllers without deep copying the drawable that holds the controller.
-                    // A deep copy of controllers may be needed to independently animate multiple copies of the same mesh.
-                    && !node->getUpdateCallback())
-            {
-                if (node->getNumParents() && nifNode->trafo.isIdentity())
-                {
-                    osg::Group* parent = node->getParent(0);
-
-                     // can be multiple children in case of ParticleSystems, with the extra ParticleSystemUpdater node
-                    for (unsigned int i=0; i<node->getNumChildren(); ++i)
-                    {
-                        osg::Node* child = node->getChild(i);
-                        if (i == node->getNumChildren()-1) // FIXME: some nicer way to determine where our actual Drawable resides...
-                        {
-                            child->addUpdateCallback(node->getUpdateCallback());
-                            child->setStateSet(node->getStateSet());
-                            child->setName(node->getName());
-                            // make sure to copy the UserDataContainer with the record index, so that connections to an animated collision shape don't break
-                            child->setUserDataContainer(node->getUserDataContainer());
-                        }
-                        parent->addChild(child);
-                    }
-
-                    node->removeChildren(0, node->getNumChildren());
-                    parent->removeChild(node);
-                }
-            }
-            // For NiTriShapes *with* a valid transform, perhaps we could apply the transform to the vertices.
-            // Need to make sure that won't break transparency sorting. Check what the original engine is doing?
+            toSetup->setFunction(std::shared_ptr<ControllerFunction>(new ControllerFunction(ctrl)));
         }
 
         osg::ref_ptr<osg::LOD> handleLodNode(const Nif::NiLODNode* niLodNode)
@@ -546,12 +415,12 @@ namespace NifOsg
             stateset->addUniform(new osg::Uniform("envMapColor", osg::Vec4f(1,1,1,1)));
         }
 
-        osg::ref_ptr<osg::Node> handleNode(const Nif::Node* nifNode, osg::Group* parentNode, Resource::ImageManager* imageManager,
-                                std::vector<int> boundTextures, int animflags, int particleflags, bool skipMeshes, TextKeyMap* textKeys, osg::Node* rootNode=NULL)
+        // Get a default dataVariance for this node to be used as a hint by optimization (post)routines
+        osg::ref_ptr<osg::Group> createNode(const Nif::Node* nifNode)
         {
-            osg::ref_ptr<osg::Group> node = new osg::MatrixTransform(nifNode->trafo.toMatrix());
+            osg::ref_ptr<osg::Group> node;
+            osg::Object::DataVariance dataVariance = osg::Object::UNSPECIFIED;
 
-            // Set a default DataVariance (used as hint by optimization routines).
             switch (nifNode->recType)
             {
             case Nif::RC_NiTriShape:
@@ -559,26 +428,55 @@ namespace NifOsg
             case Nif::RC_NiRotatingParticles:
                 // Leaf nodes in the NIF hierarchy, so won't be able to dynamically attach children.
                 // No support for keyframe controllers (just crashes in the original engine).
-                node->setDataVariance(osg::Object::STATIC);
+                if (nifNode->trafo.isIdentity())
+                    node = new osg::Group;
+                dataVariance = osg::Object::STATIC;
+                break;
+            case Nif::RC_NiBillboardNode:
+                dataVariance = osg::Object::DYNAMIC;
                 break;
             default:
-                // could have new children attached at any time, or added external keyframe controllers from .kf files
-                node->setDataVariance(osg::Object::DYNAMIC);
+                // The Root node can be created as a Group if no transformation is required.
+                // This takes advantage of the fact root nodes can't have additional controllers
+                // loaded from an external .kf file (original engine just throws "can't find node" errors if you try).
+                if (!nifNode->parent && nifNode->controller.empty() && nifNode->trafo.isIdentity())
+                {
+                    node = new osg::Group;
+                    dataVariance = osg::Object::STATIC;
+                }
+                else
+                {
+                    dataVariance = (nifNode->controller.empty() ? osg::Object::STATIC : osg::Object::DYNAMIC);
+                }
+
+                if (nifNode->isBone)
+                    dataVariance = osg::Object::DYNAMIC;
+
                 break;
             }
+            if (!node)
+                node = new osg::MatrixTransform(nifNode->trafo.toMatrix());
+
+            node->setDataVariance(dataVariance);
+
+            return node;
+        }
+
+        osg::ref_ptr<osg::Node> handleNode(const Nif::Node* nifNode, osg::Group* parentNode, Resource::ImageManager* imageManager,
+                                std::vector<int> boundTextures, int animflags, bool skipMeshes, bool hasMarkers, bool isAnimated, TextKeyMap* textKeys, osg::Node* rootNode=NULL)
+        {
+            if (rootNode != NULL && Misc::StringUtils::ciEqual(nifNode->name, "Bounding Box"))
+                return NULL;
+
+            osg::ref_ptr<osg::Group> node = createNode(nifNode);
 
             if (nifNode->recType == Nif::RC_NiBillboardNode)
             {
                 node->addCullCallback(new BillboardCallback);
             }
-            else if (!rootNode && nifNode->controller.empty() && nifNode->trafo.isIdentity())
-            {
-                // The Root node can be created as a Group if no transformation is required.
-                // This takes advantage of the fact root nodes can't have additional controllers
-                // loaded from an external .kf file (original engine just throws "can't find node" errors if you try).
-                node = new osg::Group;
-                node->setDataVariance(osg::Object::STATIC);
-            }
+
+            if (!nifNode->controller.empty() && nifNode->controller->recType == Nif::RC_NiKeyframeController)
+                isAnimated = true;
 
             node->setName(nifNode->name);
 
@@ -612,15 +510,13 @@ namespace NifOsg
                     if(sd->string == "MRK" && !Loader::getShowMarkers())
                     {
                         // Marker objects. These meshes are only visible in the editor.
-                        skipMeshes = true;
+                        hasMarkers = true;
                     }
                 }
             }
 
-            if (nifNode->recType == Nif::RC_NiBSAnimationNode)
-                animflags |= nifNode->flags;
-            if (nifNode->recType == Nif::RC_NiBSParticleNode)
-                particleflags |= nifNode->flags;
+            if (nifNode->recType == Nif::RC_NiBSAnimationNode || nifNode->recType == Nif::RC_NiBSParticleNode)
+                animflags = nifNode->flags;
 
             // Hide collision shapes, but don't skip the subgraph
             // We still need to animate the hidden bones so the physics system can access them
@@ -646,6 +542,11 @@ namespace NifOsg
                 node->setNodeMask(0x1);
             }
 
+            if ((skipMeshes || hasMarkers) && isAnimated) // make sure the empty node is not optimized away so the physicssystem can find it.
+            {
+                node->setDataVariance(osg::Object::DYNAMIC);
+            }
+
             osg::ref_ptr<SceneUtil::CompositeStateSetUpdater> composite = new SceneUtil::CompositeStateSetUpdater;
 
             applyNodeProperties(nifNode, node, composite, imageManager, boundTextures, animflags);
@@ -653,17 +554,22 @@ namespace NifOsg
             if (nifNode->recType == Nif::RC_NiTriShape && !skipMeshes)
             {
                 const Nif::NiTriShape* triShape = static_cast<const Nif::NiTriShape*>(nifNode);
-                if (triShape->skin.empty())
-                    handleTriShape(triShape, node, composite, boundTextures, animflags);
-                else
-                    handleSkinnedTriShape(triShape, node, composite, boundTextures, animflags);
+                const std::string nodeName = Misc::StringUtils::lowerCase(triShape->name);
+                static const std::string pattern = "tri editormarker";
+                if (!hasMarkers || nodeName.compare(0, pattern.size(), pattern) != 0)
+                {
+                    if (triShape->skin.empty())
+                        handleTriShape(triShape, node, composite, boundTextures, animflags);
+                    else
+                        handleSkinnedTriShape(triShape, node, composite, boundTextures, animflags);
 
-                if (!nifNode->controller.empty())
-                    handleMeshControllers(nifNode, node, composite, boundTextures, animflags);
+                    if (!nifNode->controller.empty())
+                        handleMeshControllers(nifNode, node, composite, boundTextures, animflags);
+                }
             }
 
             if(nifNode->recType == Nif::RC_NiAutoNormalParticles || nifNode->recType == Nif::RC_NiRotatingParticles)
-                handleParticleSystem(nifNode, node, composite, animflags, particleflags, rootNode);
+                handleParticleSystem(nifNode, node, composite, animflags, rootNode);
 
             if (composite->getNumControllers() > 0)
                 node->addUpdateCallback(composite);
@@ -673,9 +579,6 @@ namespace NifOsg
             // We can take advantage of this constraint for optimizations later.
             if (!nifNode->controller.empty() && node->getDataVariance() == osg::Object::DYNAMIC)
                 handleNodeControllers(nifNode, static_cast<osg::MatrixTransform*>(node.get()), animflags);
-
-            // Optimization pass
-            optimize(nifNode, node, skipMeshes);
 
 
             if (nifNode->recType == Nif::RC_NiLODNode)
@@ -700,7 +603,7 @@ namespace NifOsg
                 for(size_t i = 0;i < children.length();++i)
                 {
                     if(!children[i].empty())
-                        handleNode(children[i].getPtr(), node, imageManager, boundTextures, animflags, particleflags, skipMeshes, textKeys, rootNode);
+                        handleNode(children[i].getPtr(), node, imageManager, boundTextures, animflags, skipMeshes, hasMarkers, isAnimated, textKeys, rootNode);
                 }
             }
 
@@ -871,6 +774,13 @@ namespace NifOsg
                     const Nif::NiPlanarCollider* planarcollider = static_cast<const Nif::NiPlanarCollider*>(colliders.getPtr());
                     program->addOperator(new PlanarCollider(planarcollider));
                 }
+                else if (colliders->recType == Nif::RC_NiSphericalCollider)
+                {
+                    const Nif::NiSphericalCollider* sphericalcollider = static_cast<const Nif::NiSphericalCollider*>(colliders.getPtr());
+                    program->addOperator(new SphericalCollider(sphericalcollider));
+                }
+                else
+                    std::cerr << "Unhandled particle collider " << colliders->recName << " in " << mFilename << std::endl;
             }
         }
 
@@ -901,12 +811,12 @@ namespace NifOsg
                 // Note this position and velocity is not correct for a particle system with absolute reference frame,
                 // which can not be done in this loader since we are not attached to the scene yet. Will be fixed up post-load in the SceneManager.
                 created->setVelocity(particle.velocity);
-                const osg::Vec3f& position = particledata->vertices->at(particle.vertex);
+                const osg::Vec3f& position = particledata->vertices.at(particle.vertex);
                 created->setPosition(position);
 
                 osg::Vec4f partcolor (1.f,1.f,1.f,1.f);
-                if (particle.vertex < int(particledata->colors->size()))
-                    partcolor = particledata->colors->at(particle.vertex);
+                if (particle.vertex < int(particledata->colors.size()))
+                    partcolor = particledata->colors.at(particle.vertex);
 
                 float size = particledata->sizes.at(particle.vertex) * partctrl->size;
 
@@ -954,7 +864,7 @@ namespace NifOsg
             return emitter;
         }
 
-        void handleParticleSystem(const Nif::Node *nifNode, osg::Group *parentNode, SceneUtil::CompositeStateSetUpdater* composite, int animflags, int particleflags, osg::Node* rootNode)
+        void handleParticleSystem(const Nif::Node *nifNode, osg::Group *parentNode, SceneUtil::CompositeStateSetUpdater* composite, int animflags, osg::Node* rootNode)
         {
             osg::ref_ptr<ParticleSystem> partsys (new ParticleSystem);
             partsys->setSortMode(osgParticle::ParticleSystem::SORT_BACK_TO_FRONT);
@@ -975,7 +885,7 @@ namespace NifOsg
                 return;
             }
 
-            osgParticle::ParticleProcessor::ReferenceFrame rf = (particleflags & Nif::NiNode::ParticleFlag_LocalSpace)
+            osgParticle::ParticleProcessor::ReferenceFrame rf = (animflags & Nif::NiNode::ParticleFlag_LocalSpace)
                     ? osgParticle::ParticleProcessor::RELATIVE_RF
                     : osgParticle::ParticleProcessor::ABSOLUTE_RF;
 
@@ -1021,16 +931,18 @@ namespace NifOsg
                 emitterNode->addChild(emitter);
 
                 osg::ref_ptr<ParticleSystemController> callback(new ParticleSystemController(partctrl));
-                setupParticleController(partctrl, callback, particleflags);
+                setupController(partctrl, callback, animflags);
                 emitter->setUpdateCallback(callback);
 
-                if (!(particleflags & Nif::NiNode::ParticleFlag_AutoPlay))
+                if (!(animflags & Nif::NiNode::ParticleFlag_AutoPlay))
                 {
                     partsys->setFrozen(true);
-                    // HACK: particle system will not render in Frozen state if there was no update
-                    osg::NodeVisitor nv;
-                    partsys->update(0.0, nv);
                 }
+
+                // Due to odd code in the ParticleSystemUpdater, particle systems will not be updated in the first frame
+                // So do that update manually
+                osg::NodeVisitor nv;
+                partsys->update(0.0, nv);
             }
 
             // affectors must be attached *after* the emitter in the scene graph for correct update order
@@ -1065,10 +977,11 @@ namespace NifOsg
         {
             const Nif::NiTriShapeData* data = triShape->data.getPtr();
 
-            geometry->setVertexArray(data->vertices);
-
-            if (!data->normals->empty())
-                geometry->setNormalArray(data->normals);
+            {
+                geometry->setVertexArray(new osg::Vec3Array(data->vertices.size(), &data->vertices[0]));
+                if (!data->normals.empty())
+                    geometry->setNormalArray(new osg::Vec3Array(data->normals.size(), &data->normals[0]), osg::Array::BIND_PER_VERTEX);
+            }
 
             int textureStage = 0;
             for (std::vector<int>::const_iterator it = boundTextures.begin(); it != boundTextures.end(); ++it,++textureStage)
@@ -1078,18 +991,19 @@ namespace NifOsg
                 {
                     std::cerr << "Warning: out of bounds UV set " << uvSet << " on TriShape \"" << triShape->name << "\" in " << mFilename << std::endl;
                     if (!data->uvlist.empty())
-                        geometry->setTexCoordArray(textureStage, data->uvlist[0]);
+                        geometry->setTexCoordArray(textureStage, new osg::Vec2Array(data->uvlist[0].size(), &data->uvlist[0][0]), osg::Array::BIND_PER_VERTEX);
                     continue;
                 }
 
-                geometry->setTexCoordArray(textureStage, data->uvlist[uvSet]);
+                geometry->setTexCoordArray(textureStage, new osg::Vec2Array(data->uvlist[uvSet].size(), &data->uvlist[uvSet][0]), osg::Array::BIND_PER_VERTEX);
             }
 
-            if (!data->colors->empty())
-                geometry->setColorArray(data->colors);
+            if (!data->colors.empty())
+                geometry->setColorArray(new osg::Vec4Array(data->colors.size(), &data->colors[0]), osg::Array::BIND_PER_VERTEX);
 
-            if (!data->triangles->empty())
-                geometry->addPrimitiveSet(data->triangles);
+            geometry->addPrimitiveSet(new osg::DrawElementsUShort(osg::PrimitiveSet::TRIANGLES,
+                                                                  data->triangles.size(),
+                                                                  (unsigned short*)&data->triangles[0]));
 
             // osg::Material properties are handled here for two reasons:
             // - if there are no vertex colors, we need to disable colorMode.
@@ -1097,110 +1011,54 @@ namespace NifOsg
             //   above the actual renderable would be tedious.
             std::vector<const Nif::Property*> drawableProps;
             collectDrawableProperties(triShape, drawableProps);
-            applyDrawableProperties(parentNode, drawableProps, composite, !data->colors->empty(), animflags, false);
+            applyDrawableProperties(parentNode, drawableProps, composite, !data->colors.empty(), animflags, false);
         }
 
         void handleTriShape(const Nif::NiTriShape* triShape, osg::Group* parentNode, SceneUtil::CompositeStateSetUpdater* composite, const std::vector<int>& boundTextures, int animflags)
         {
-            osg::ref_ptr<osg::Geometry> geometry;
+            osg::ref_ptr<osg::Drawable> drawable;
             for (Nif::ControllerPtr ctrl = triShape->controller; !ctrl.empty(); ctrl = ctrl->next)
             {
                 if (!(ctrl->flags & Nif::NiNode::ControllerFlag_Active))
                     continue;
                 if(ctrl->recType == Nif::RC_NiGeomMorpherController)
                 {
-                    geometry = handleMorphGeometry(static_cast<const Nif::NiGeomMorpherController*>(ctrl.getPtr()), triShape, parentNode, composite, boundTextures, animflags);
+                    drawable = handleMorphGeometry(static_cast<const Nif::NiGeomMorpherController*>(ctrl.getPtr()), triShape, parentNode, composite, boundTextures, animflags);
 
                     osg::ref_ptr<GeomMorpherController> morphctrl = new GeomMorpherController(
                                 static_cast<const Nif::NiGeomMorpherController*>(ctrl.getPtr())->data.getPtr());
                     setupController(ctrl.getPtr(), morphctrl, animflags);
-                    geometry->setUpdateCallback(morphctrl);
+                    drawable->setUpdateCallback(morphctrl);
                     break;
                 }
             }
 
-            if (!geometry.get())
+            if (!drawable.get())
             {
-                geometry = new osg::Geometry;
-                triShapeToGeometry(triShape, geometry, parentNode, composite, boundTextures, animflags);
+                osg::ref_ptr<osg::Geometry> geom (new osg::Geometry);
+                drawable = geom;
+                triShapeToGeometry(triShape, geom, parentNode, composite, boundTextures, animflags);
             }
 
-            if (geometry->getDataVariance() == osg::Object::DYNAMIC)
-            {
-                // Add a copy, we will alternate between the two copies every other frame using the FrameSwitch
-                // This is so we can set the DataVariance as STATIC, giving a huge performance boost
-                geometry->setDataVariance(osg::Object::STATIC);
-                osg::ref_ptr<FrameSwitch> frameswitch = new FrameSwitch;
+            drawable->setName(triShape->name);
 
-                osg::ref_ptr<osg::Geometry> geom2 = osg::clone(geometry.get(), osg::CopyOp::DEEP_COPY_NODES|osg::CopyOp::DEEP_COPY_DRAWABLES);
-                frameswitch->addChild(geometry);
-                frameswitch->addChild(geom2);
-
-                parentNode->addChild(frameswitch);
-            }
-            else
-                parentNode->addChild(geometry);
+            parentNode->addChild(drawable);
         }
 
-        osg::ref_ptr<osg::Geometry> handleMorphGeometry(const Nif::NiGeomMorpherController* morpher, const Nif::NiTriShape *triShape, osg::Node* parentNode, SceneUtil::CompositeStateSetUpdater* composite, const std::vector<int>& boundTextures, int animflags)
+        osg::ref_ptr<osg::Drawable> handleMorphGeometry(const Nif::NiGeomMorpherController* morpher, const Nif::NiTriShape *triShape, osg::Node* parentNode, SceneUtil::CompositeStateSetUpdater* composite, const std::vector<int>& boundTextures, int animflags)
         {
-            osg::ref_ptr<osgAnimation::MorphGeometry> morphGeom = new osgAnimation::MorphGeometry;
-            morphGeom->setMethod(osgAnimation::MorphGeometry::RELATIVE);
-            // No normals available in the MorphData
-            morphGeom->setMorphNormals(false);
+            osg::ref_ptr<SceneUtil::MorphGeometry> morphGeom = new SceneUtil::MorphGeometry;
 
-            morphGeom->setUpdateCallback(NULL);
-            morphGeom->setCullCallback(new UpdateMorphGeometry);
-            morphGeom->setUseVertexBufferObjects(true);
-            morphGeom->getOrCreateVertexBufferObject()->setUsage(GL_DYNAMIC_DRAW_ARB);
-
-            triShapeToGeometry(triShape, morphGeom, parentNode, composite, boundTextures, animflags);
+            osg::ref_ptr<osg::Geometry> sourceGeometry (new osg::Geometry);
+            triShapeToGeometry(triShape, sourceGeometry, parentNode, composite, boundTextures, animflags);
+            morphGeom->setSourceGeometry(sourceGeometry);
 
             const std::vector<Nif::NiMorphData::MorphData>& morphs = morpher->data.getPtr()->mMorphs;
             if (morphs.empty())
                 return morphGeom;
             // Note we are not interested in morph 0, which just contains the original vertices
             for (unsigned int i = 1; i < morphs.size(); ++i)
-            {
-                osg::ref_ptr<osg::Geometry> morphTarget = new osg::Geometry;
-                morphTarget->setVertexArray(morphs[i].mVertices);
-                morphGeom->addMorphTarget(morphTarget, 0.f);
-            }
-
-            // build the bounding box containing all possible morph combinations
-
-            std::vector<osg::BoundingBox> vertBounds(morphs[0].mVertices->size());
-
-            // Since we don't know what combinations of morphs are being applied we need to keep track of a bounding box for each vertex.
-            // The minimum/maximum of the box is the minimum/maximum offset the vertex can have from its starting position.
-
-            // Start with zero offsets which will happen when no morphs are applied.
-            for (unsigned int i=0; i<vertBounds.size(); ++i)
-                vertBounds[i].set(osg::Vec3f(0,0,0), osg::Vec3f(0,0,0));
-
-            for (unsigned int i = 1; i < morphs.size(); ++i)
-            {
-                for (unsigned int j=0; j<morphs[i].mVertices->size() && vertBounds.size(); ++j)
-                {
-                    osg::BoundingBox& bounds = vertBounds[j];
-                    bounds.expandBy(bounds._max + (*morphs[i].mVertices)[j]);
-                    bounds.expandBy(bounds._min + (*morphs[i].mVertices)[j]);
-                }
-            }
-
-            osg::BoundingBox box;
-            for (unsigned int i=0; i<vertBounds.size(); ++i)
-            {
-                vertBounds[i]._max += (*morphs[0].mVertices)[i];
-                vertBounds[i]._min += (*morphs[0].mVertices)[i];
-                box.expandBy(vertBounds[i]);
-            }
-
-            // For the initial bounding box (used for object placement) use the default pose, fire off a bounding compute to set this initial box
-            morphGeom->getBound();
-
-            // Now set up the callback so that we get properly enlarged bounds if/when the mesh starts animating
-            morphGeom->setComputeBoundingBoxCallback(new StaticBoundingBoxCallback(box));
+                morphGeom->addMorphTarget(new osg::Vec3Array(morphs[i].mVertices.size(), &morphs[i].mVertices[0]), 0.f);
 
             return morphGeom;
         }
@@ -1213,6 +1071,7 @@ namespace NifOsg
 
             osg::ref_ptr<SceneUtil::RigGeometry> rig(new SceneUtil::RigGeometry);
             rig->setSourceGeometry(geometry);
+            rig->setName(triShape->name);
 
             const Nif::NiSkinInstance *skin = triShape->skin.getPtr();
 
@@ -1227,7 +1086,6 @@ namespace NifOsg
 
                 SceneUtil::RigGeometry::BoneInfluence influence;
                 const std::vector<Nif::NiSkinData::VertWeight> &weights = data->bones[i].weights;
-                //influence.mWeights.reserve(weights.size());
                 for(size_t j = 0;j < weights.size();j++)
                 {
                     std::pair<unsigned short, float> indexWeight = std::make_pair(weights[j].vertex, weights[j].weight);
@@ -1240,17 +1098,7 @@ namespace NifOsg
             }
             rig->setInfluenceMap(map);
 
-            // Add a copy, we will alternate between the two copies every other frame using the FrameSwitch
-            // This is so we can set the DataVariance as STATIC, giving a huge performance boost
-            rig->setDataVariance(osg::Object::STATIC);
-
-            osg::ref_ptr<FrameSwitch> frameswitch = new FrameSwitch;
-
-            SceneUtil::RigGeometry* rig2 = osg::clone(rig.get(), osg::CopyOp::DEEP_COPY_NODES|osg::CopyOp::DEEP_COPY_DRAWABLES);
-            frameswitch->addChild(rig);
-            frameswitch->addChild(rig2);
-
-            parentNode->addChild(frameswitch);
+            parentNode->addChild(rig);
         }
 
         osg::BlendFunc::BlendFuncMode getBlendMode(int mode)
@@ -1347,8 +1195,8 @@ namespace NifOsg
             if (pixelData->mipmaps.empty())
                 return NULL;
 
-            unsigned int width = 0;
-            unsigned int height = 0;
+            int width = 0;
+            int height = 0;
 
             std::vector<unsigned int> mipmapVector;
             for (unsigned int i=0; i<pixelData->mipmaps.size()-3; ++i)
@@ -1358,7 +1206,7 @@ namespace NifOsg
                 size_t mipSize = mip.height * mip.width * pixelData->bpp / 8;
                 if (mipSize + mip.dataOffset > pixelData->data.size())
                 {
-                    std::cerr << "Internal texture's mipmap data out of bounds" << std::endl;
+                    std::cerr << "Warning: Internal texture's mipmap data out of bounds, ignoring texture" << std::endl;
                     return NULL;
                 }
 
@@ -1373,7 +1221,7 @@ namespace NifOsg
 
             if (width <= 0 || height <= 0)
             {
-                std::cerr << "Width and height must be non zero " << std::endl;
+                std::cerr << "Warning: Internal Texture Width and height must be non zero, ignoring texture" << std::endl;
                 return NULL;
             }
 
@@ -1415,7 +1263,7 @@ namespace NifOsg
                         {
                             // Not used by the vanilla engine. MCP (Morrowind Code Patch) adds an option to use Gloss maps:
                             // "- Gloss map fix. Morrowind removed gloss map entries from model files after loading them. This stops Morrowind from removing them."
-                            std::cerr << "NiTexturingProperty::GlossTexture in " << mFilename << " not currently used." << std::endl;
+                            //std::cerr << "NiTexturingProperty::GlossTexture in " << mFilename << " not currently used." << std::endl;
                             continue;
                         }
                         default:
@@ -1426,20 +1274,27 @@ namespace NifOsg
                     }
 
                     const Nif::NiTexturingProperty::Texture& tex = texprop->textures[i];
-                    if(tex.texture.empty())
+                    if(tex.texture.empty() && texprop->controller.empty())
                     {
                         std::cerr << "Warning: texture layer " << i << " is in use but empty in " << mFilename << std::endl;
                         continue;
                     }
-                    const Nif::NiSourceTexture *st = tex.texture.getPtr();
-                    osg::ref_ptr<osg::Image> image = handleSourceTexture(st, imageManager);
+
+                    // create a new texture, will later attempt to share using the SharedStateManager
+                    osg::ref_ptr<osg::Texture2D> texture2d;
+                    if (!tex.texture.empty())
+                    {
+                        const Nif::NiSourceTexture *st = tex.texture.getPtr();
+                        osg::ref_ptr<osg::Image> image = handleSourceTexture(st, imageManager);
+                        texture2d = new osg::Texture2D(image);
+                    }
+                    else
+                        texture2d = new osg::Texture2D;
 
                     unsigned int clamp = static_cast<unsigned int>(tex.clamp);
                     int wrapT = (clamp) & 0x1;
                     int wrapS = (clamp >> 1) & 0x1;
 
-                    // create a new texture, will later attempt to share using the SharedStateManager
-                    osg::ref_ptr<osg::Texture2D> texture2d (new osg::Texture2D(image));
                     texture2d->setWrap(osg::Texture::WRAP_S, wrapS ? osg::Texture::REPEAT : osg::Texture::CLAMP);
                     texture2d->setWrap(osg::Texture::WRAP_T, wrapT ? osg::Texture::REPEAT : osg::Texture::CLAMP);
 
@@ -1539,7 +1394,7 @@ namespace NifOsg
             case Nif::RC_NiStencilProperty:
             {
                 const Nif::NiStencilProperty* stencilprop = static_cast<const Nif::NiStencilProperty*>(property);
-                osg::FrontFace* frontFace = new osg::FrontFace;
+                osg::ref_ptr<osg::FrontFace> frontFace = new osg::FrontFace;
                 switch (stencilprop->data.drawMode)
                 {
                 case 2:
@@ -1551,6 +1406,7 @@ namespace NifOsg
                     frontFace->setMode(osg::FrontFace::COUNTER_CLOCKWISE);
                     break;
                 }
+                frontFace = shareAttribute(frontFace);
 
                 osg::StateSet* stateset = node->getOrCreateStateSet();
                 stateset->setAttribute(frontFace, osg::StateAttribute::ON);
@@ -1559,11 +1415,12 @@ namespace NifOsg
 
                 if (stencilprop->data.enabled != 0)
                 {
-                    osg::Stencil* stencil = new osg::Stencil;
+                    osg::ref_ptr<osg::Stencil> stencil = new osg::Stencil;
                     stencil->setFunction(getStencilFunction(stencilprop->data.compareFunc), stencilprop->data.stencilRef, stencilprop->data.stencilMask);
                     stencil->setStencilFailOperation(getStencilOperation(stencilprop->data.failAction));
                     stencil->setStencilPassAndDepthFailOperation(getStencilOperation(stencilprop->data.zFailAction));
                     stencil->setStencilPassAndDepthPassOperation(getStencilOperation(stencilprop->data.zPassAction));
+                    stencil = shareAttribute(stencil);
 
                     stateset->setAttributeAndModes(stencil, osg::StateAttribute::ON);
                 }
@@ -1572,9 +1429,10 @@ namespace NifOsg
             case Nif::RC_NiWireframeProperty:
             {
                 const Nif::NiWireframeProperty* wireprop = static_cast<const Nif::NiWireframeProperty*>(property);
-                osg::PolygonMode* mode = new osg::PolygonMode;
+                osg::ref_ptr<osg::PolygonMode> mode = new osg::PolygonMode;
                 mode->setMode(osg::PolygonMode::FRONT_AND_BACK, wireprop->flags == 0 ? osg::PolygonMode::FILL
                                                                                      : osg::PolygonMode::LINE);
+                mode = shareAttribute(mode);
                 node->getOrCreateStateSet()->setAttributeAndModes(mode, osg::StateAttribute::ON);
                 break;
             }
@@ -1582,8 +1440,9 @@ namespace NifOsg
             {
                 const Nif::NiZBufferProperty* zprop = static_cast<const Nif::NiZBufferProperty*>(property);
                 // VER_MW doesn't support a DepthFunction according to NifSkope
-                osg::Depth* depth = new osg::Depth;
+                osg::ref_ptr<osg::Depth> depth = new osg::Depth;
                 depth->setWriteMask((zprop->flags>>1)&1);
+                depth = shareAttribute(depth);
                 node->getOrCreateStateSet()->setAttributeAndModes(depth, osg::StateAttribute::ON);
                 break;
             }
@@ -1620,21 +1479,25 @@ namespace NifOsg
             }
         }
 
-        struct CompareMaterial
+        struct CompareStateAttribute
         {
-            bool operator() (const osg::ref_ptr<osg::Material>& left, const osg::ref_ptr<osg::Material>& right) const
+            bool operator() (const osg::ref_ptr<osg::StateAttribute>& left, const osg::ref_ptr<osg::StateAttribute>& right) const
             {
                 return left->compare(*right) < 0;
             }
         };
 
-        osg::Material* shareMaterial(osg::Material* mat)
+        // global sharing of State Attributes will reduce the number of GL calls as the osg::State will check by pointer to see if state is the same
+        template <class Attribute>
+        Attribute* shareAttribute(const osg::ref_ptr<Attribute>& attr)
         {
-            typedef std::set<osg::ref_ptr<osg::Material>, CompareMaterial> MatCache;
-            static MatCache mats;
-            MatCache::iterator found = mats.find(mat);
-            if (found == mats.end())
-                found = mats.insert(mat).first;
+            typedef std::set<osg::ref_ptr<Attribute>, CompareStateAttribute> Cache;
+            static Cache sCache;
+            static OpenThreads::Mutex sMutex;
+            OpenThreads::ScopedLock<OpenThreads::Mutex> lock(sMutex);
+            typename Cache::iterator found = sCache.find(attr);
+            if (found == sCache.end())
+                found = sCache.insert(attr).first;
             return *found;
         }
 
@@ -1650,6 +1513,10 @@ namespace NifOsg
             // NIF material defaults don't match OpenGL defaults
             mat->setDiffuse(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
             mat->setAmbient(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+
+            bool hasMatCtrl = false;
+
+            int lightmode = 1;
 
             for (std::vector<const Nif::Property*>::const_reverse_iterator it = properties.rbegin(); it != properties.rend(); ++it)
             {
@@ -1673,26 +1540,32 @@ namespace NifOsg
                     mat->setShininess(osg::Material::FRONT_AND_BACK, matprop->data.glossiness);
 
                     if (!matprop->controller.empty())
+                    {
+                        hasMatCtrl = true;
                         handleMaterialControllers(matprop, composite, animflags);
+                    }
 
                     break;
                 }
                 case Nif::RC_NiVertexColorProperty:
                 {
                     const Nif::NiVertexColorProperty* vertprop = static_cast<const Nif::NiVertexColorProperty*>(property);
-                    if (!hasVertexColors)
-                        break;
-                    switch (vertprop->flags)
+                    lightmode = vertprop->data.lightmode;
+
+                    switch (vertprop->data.vertmode)
                     {
-                    case 0:
-                        mat->setColorMode(osg::Material::OFF);
-                        break;
-                    case 1:
-                        mat->setColorMode(osg::Material::EMISSION);
-                        break;
-                    case 2:
-                        mat->setColorMode(osg::Material::AMBIENT_AND_DIFFUSE);
-                        break;
+                        case 0:
+                            mat->setColorMode(osg::Material::OFF);
+                            break;
+                        case 1:
+                            mat->setColorMode(osg::Material::EMISSION);
+                            break;
+                        case 2:
+                            if (lightmode != 0)
+                                mat->setColorMode(osg::Material::AMBIENT_AND_DIFFUSE);
+                            else
+                                mat->setColorMode(osg::Material::OFF);
+                            break;
                     }
                     break;
                 }
@@ -1701,9 +1574,10 @@ namespace NifOsg
                     const Nif::NiAlphaProperty* alphaprop = static_cast<const Nif::NiAlphaProperty*>(property);
                     if (alphaprop->flags&1)
                     {
-                        stateset->setAttributeAndModes(new osg::BlendFunc(getBlendMode((alphaprop->flags>>1)&0xf),
-                                                                          getBlendMode((alphaprop->flags>>5)&0xf)),
-                                                       osg::StateAttribute::ON);
+                        osg::ref_ptr<osg::BlendFunc> blendFunc (new osg::BlendFunc(getBlendMode((alphaprop->flags>>1)&0xf),
+                                                                                   getBlendMode((alphaprop->flags>>5)&0xf)));
+                        blendFunc = shareAttribute(blendFunc);
+                        stateset->setAttributeAndModes(blendFunc, osg::StateAttribute::ON);
 
                         bool noSort = (alphaprop->flags>>13)&1;
                         if (!noSort)
@@ -1720,8 +1594,9 @@ namespace NifOsg
 
                     if((alphaprop->flags>>9)&1)
                     {
-                        stateset->setAttributeAndModes(new osg::AlphaFunc(getTestMode((alphaprop->flags>>10)&0x7),
-                                                                          alphaprop->data.threshold/255.f), osg::StateAttribute::ON);
+                        osg::ref_ptr<osg::AlphaFunc> alphaFunc (new osg::AlphaFunc(getTestMode((alphaprop->flags>>10)&0x7), alphaprop->data.threshold/255.f));
+                        alphaFunc = shareAttribute(alphaFunc);
+                        stateset->setAttributeAndModes(alphaFunc, osg::StateAttribute::ON);
                     }
                     else
                     {
@@ -1744,9 +1619,47 @@ namespace NifOsg
                 mat->setColorMode(osg::Material::AMBIENT);
             }
 
-            // TODO: this could be replaced by a more generic mechanism of sharing any type of State Attribute
-            // apply only for Materials for now
-            mat = shareMaterial(mat);
+            if (lightmode == 0)
+            {
+                osg::Vec4f diffuse = mat->getDiffuse(osg::Material::FRONT_AND_BACK);
+                diffuse = osg::Vec4f(0,0,0,diffuse.a());
+                mat->setDiffuse(osg::Material::FRONT_AND_BACK, diffuse);
+                mat->setAmbient(osg::Material::FRONT_AND_BACK, osg::Vec4f());
+            }
+
+            // If we're told to use vertex colors but there are none to use, use a default color instead.
+            if (!hasVertexColors)
+            {
+                switch (mat->getColorMode())
+                {
+                case osg::Material::AMBIENT:
+                    mat->setAmbient(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+                    break;
+                case osg::Material::AMBIENT_AND_DIFFUSE:
+                    mat->setAmbient(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+                    mat->setDiffuse(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+                    break;
+                case osg::Material::EMISSION:
+                    mat->setEmission(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+                    break;
+                default:
+                    break;
+                }
+                mat->setColorMode(osg::Material::OFF);
+            }
+
+            if (!hasMatCtrl && mat->getColorMode() == osg::Material::OFF
+                    && mat->getEmission(osg::Material::FRONT_AND_BACK) == osg::Vec4f(0,0,0,1)
+                    && mat->getDiffuse(osg::Material::FRONT_AND_BACK) == osg::Vec4f(1,1,1,1)
+                    && mat->getAmbient(osg::Material::FRONT_AND_BACK) == osg::Vec4f(1,1,1,1)
+                    && mat->getShininess(osg::Material::FRONT_AND_BACK) == 0
+                    && mat->getSpecular(osg::Material::FRONT_AND_BACK) == osg::Vec4f(0.f, 0.f, 0.f, 0.f))
+            {
+                // default state, skip
+                return;
+            }
+
+            mat = shareAttribute(mat);
 
             stateset->setAttributeAndModes(mat, osg::StateAttribute::ON);
         }

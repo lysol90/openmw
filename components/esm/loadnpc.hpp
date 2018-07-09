@@ -43,10 +43,12 @@ struct NPC
       Misc          = 0x00400,
       Potions       = 0x02000,
 
+      AllItems = Weapon|Armor|Clothing|Books|Ingredients|Picks|Probes|Lights|Apparatus|RepairItem|Misc|Potions,
+
       // Other services
       Spells        = 0x00800,
       MagicItems    = 0x01000,
-      Training      = 0x04000, // What skills?
+      Training      = 0x04000,
       Spellmaking   = 0x08000,
       Enchanting    = 0x10000,
       Repair        = 0x20000
@@ -93,6 +95,8 @@ struct NPC
         int mGold;
     }; // 52 bytes
 
+    //Structure for autocalculated characters.
+    // This is only used for load and save operations.
     struct NPDTstruct12
     {
         short mLevel;
@@ -104,8 +108,9 @@ struct NPC
     #pragma pack(pop)
 
     unsigned char mNpdtType;
-    NPDTstruct52 mNpdt52;
-    NPDTstruct12 mNpdt12; //for autocalculated characters
+    //Worth noting when saving the struct:
+    // Although we might read a NPDTstruct12 in, we use NPDTstruct52 internally
+    NPDTstruct52 mNpdt;
 
     int getFactionRank() const; /// wrapper for mNpdt*, -1 = no rank
 
@@ -139,6 +144,9 @@ struct NPC
 
     void blank();
     ///< Set record to default state (does not touch the ID).
+
+    /// Resets the mNpdt object
+    void blankNpdt();
 };
 }
 #endif

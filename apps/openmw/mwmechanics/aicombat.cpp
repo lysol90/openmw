@@ -9,15 +9,19 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/dialoguemanager.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 
 #include "../mwrender/animation.hpp"
 
+#include "pathgrid.hpp"
 #include "creaturestats.hpp"
 #include "steering.hpp"
 #include "movement.hpp"
 #include "character.hpp"
 #include "aicombataction.hpp"
 #include "combat.hpp"
+#include "coordinateconverter.hpp"
+#include "actorutil.hpp"
 
 namespace
 {
@@ -31,56 +35,10 @@ namespace
 
 namespace MWMechanics
 {
-    
-    /// \brief This class holds the variables AiCombat needs which are deleted if the package becomes inactive.
-    struct AiCombatStorage : AiTemporaryBase
+    AiCombat::AiCombat(const MWWorld::Ptr& actor)
     {
-        float mAttackCooldown;
-        float mTimerReact;
-        float mTimerCombatMove;
-        bool mReadyToAttack;
-        bool mAttack;
-        float mAttackRange;
-        bool mCombatMove;
-        osg::Vec3f mLastTargetPos;
-        const MWWorld::CellStore* mCell;
-        boost::shared_ptr<Action> mCurrentAction;
-        float mActionCooldown;
-        float mStrength;
-        bool mForceNoShortcut;
-        ESM::Position mShortcutFailPos;
-        MWMechanics::Movement mMovement;
-        
-        AiCombatStorage():
-        mAttackCooldown(0),
-        mTimerReact(AI_REACTION_TIME),
-        mTimerCombatMove(0),
-        mReadyToAttack(false),
-        mAttack(false),
-        mAttackRange(0),
-        mCombatMove(false),
-        mLastTargetPos(0,0,0),
-        mCell(NULL),
-        mCurrentAction(),
-        mActionCooldown(0),
-        mStrength(),
-        mForceNoShortcut(false),
-        mShortcutFailPos(),
-        mMovement()
-        {}
-
-        void startCombatMove(bool isDistantCombat, float distToTarget, float rangeAttack, const MWWorld::Ptr& actor, const MWWorld::Ptr& target);
-        void updateCombatMove(float duration);
-        void stopCombatMove();
-        void startAttackIfReady(const MWWorld::Ptr& actor, CharacterController& characterController, 
-            const ESM::Weapon* weapon, bool distantCombat);
-        void updateAttack(CharacterController& characterController);
-        void stopAttack();
-    };
-    
-    AiCombat::AiCombat(const MWWorld::Ptr& actor) :
-        mTargetActorId(actor.getClass().getCreatureStats(actor).getActorId())
-    {}
+        mTargetActorId = actor.getClass().getCreatureStats(actor).getActorId();
+    }
 
     AiCombat::AiCombat(const ESM::AiSequence::AiCombat *combat)
     {
@@ -89,7 +47,7 @@ namespace MWMechanics
 
     void AiCombat::init()
     {
-        
+
     }
 
     /*
@@ -135,7 +93,7 @@ namespace MWMechanics
      *
      * TODO:
      *
-     * Use the Observer Pattern to co-ordinate attacks, provide intelligence on
+     * Use the observer pattern to coordinate attacks, provide intelligence on
      * whether the target was hit, etc.
      */
 
@@ -157,16 +115,27 @@ namespace MWMechanics
                 || target.getClass().getCreatureStats(target).isDead())
             return true;
 
-        if (storage.mCurrentAction.get()) // need to wait to init action with it's attack range
+        if (!storage.isFleeing())
         {
-            //Update every frame
-            bool is_target_reached = pathTo(actor, target.getRefData().getPosition().pos, duration, storage.mAttackRange);
-            if (is_target_reached) storage.mReadyToAttack = true;
-        }
+            if (storage.mCurrentAction.get()) // need to wait to init action with its attack range
+            {
+                //Update every frame. UpdateLOS uses a timer, so the LOS check does not happen every frame.
+                updateLOS(actor, target, duration, storage);
+                float targetReachedTolerance = 0.0f;
+                if (storage.mLOS)
+                    targetReachedTolerance = storage.mAttackRange;
+                bool is_target_reached = pathTo(actor, target.getRefData().getPosition().pos, duration, targetReachedTolerance);
+                if (is_target_reached) storage.mReadyToAttack = true;
+            }
 
-        storage.updateCombatMove(duration);
-        if (storage.mReadyToAttack) updateActorsMovement(actor, duration, storage);
-        storage.updateAttack(characterController);
+            storage.updateCombatMove(duration);
+            if (storage.mReadyToAttack) updateActorsMovement(actor, duration, storage);
+            storage.updateAttack(characterController);
+        }
+        else
+        {
+            updateFleeing(actor, target, duration, storage);
+        }
         storage.mActionCooldown -= duration;
 
         float& timerReact = storage.mTimerReact;
@@ -177,20 +146,15 @@ namespace MWMechanics
         else
         {
             timerReact = 0;
-            attack(actor, target, storage, characterController);
+            if (attack(actor, target, storage, characterController))
+                return true;
         }
 
         return false;
     }
 
-    void AiCombat::attack(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage, CharacterController& characterController)
+    bool AiCombat::attack(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage, CharacterController& characterController)
     {
-        if (isTargetMagicallyHidden(target))
-        {
-            storage.stopAttack();
-            return; // TODO: run away instead of doing nothing
-        }
-
         const MWWorld::CellStore*& currentCell = storage.mCell;
         bool cellChange = currentCell && (actor.getCell() != currentCell);
         if(!currentCell || cellChange)
@@ -198,29 +162,68 @@ namespace MWMechanics
             currentCell = actor.getCell();
         }
 
+        bool forceFlee = false;
+        if (!canFight(actor, target))
+        {
+            storage.stopAttack();
+            characterController.setAttackingOrSpell(false);
+            storage.mActionCooldown = 0.f;
+            // Continue combat if target is player or player follower/escorter and an attack has been attempted
+            const std::list<MWWorld::Ptr>& playerFollowersAndEscorters = MWBase::Environment::get().getMechanicsManager()->getActorsSidingWith(MWMechanics::getPlayer());
+            bool targetSidesWithPlayer = (std::find(playerFollowersAndEscorters.begin(), playerFollowersAndEscorters.end(), target) != playerFollowersAndEscorters.end());
+            if ((target == MWMechanics::getPlayer() || targetSidesWithPlayer)
+                && ((actor.getClass().getCreatureStats(actor).getHitAttemptActorId() == target.getClass().getCreatureStats(target).getActorId())
+                || (target.getClass().getCreatureStats(target).getHitAttemptActorId() == actor.getClass().getCreatureStats(actor).getActorId())))
+                forceFlee = true;
+            else // Otherwise end combat
+                return true;
+        }
+
         const MWWorld::Class& actorClass = actor.getClass();
         actorClass.getCreatureStats(actor).setMovementFlag(CreatureStats::Flag_Run, true);
 
         float& actionCooldown = storage.mActionCooldown;
-        if (actionCooldown > 0)
-            return;
+        std::shared_ptr<Action>& currentAction = storage.mCurrentAction;
 
-        float &rangeAttack = storage.mAttackRange;
-        boost::shared_ptr<Action>& currentAction = storage.mCurrentAction;
-        if (characterController.readyToPrepareAttack())
+        if (!forceFlee)
         {
-            currentAction = prepareNextAction(actor, target);
+            if (actionCooldown > 0)
+                return false;
+
+            if (characterController.readyToPrepareAttack())
+            {
+                currentAction = prepareNextAction(actor, target);
+                actionCooldown = currentAction->getActionCooldown();
+            }
+        }
+        else
+        {
+            currentAction.reset(new ActionFlee());
             actionCooldown = currentAction->getActionCooldown();
         }
 
-        const ESM::Weapon *weapon = NULL;
-        bool isRangedCombat = false;
-        if (currentAction.get())
+        if (!currentAction)
+            return false;
+
+        if (storage.isFleeing() != currentAction->isFleeing())
         {
-            rangeAttack = currentAction->getCombatRange(isRangedCombat);
-            // Get weapon characteristics
-            weapon = currentAction->getWeapon();
+            if (currentAction->isFleeing())
+            {
+                storage.startFleeing();
+                MWBase::Environment::get().getDialogueManager()->say(actor, "flee");
+                return false;
+            }
+            else
+                storage.stopFleeing();
         }
+
+        bool isRangedCombat = false;
+        float &rangeAttack = storage.mAttackRange;
+
+        rangeAttack = currentAction->getCombatRange(isRangedCombat);
+
+        // Get weapon characteristics
+        const ESM::Weapon* weapon = currentAction->getWeapon();
 
         ESM::Position pos = actor.getRefData().getPosition();
         osg::Vec3f vActorPos(pos.asVec3());
@@ -229,19 +232,7 @@ namespace MWMechanics
         osg::Vec3f vAimDir = MWBase::Environment::get().getWorld()->aimToTarget(actor, target);
         float distToTarget = MWBase::Environment::get().getWorld()->getHitDistance(actor, target);
 
-        if (!currentAction)
-            return;
-
-        storage.mReadyToAttack = (currentAction->isAttackingOrSpell() && distToTarget <= rangeAttack);
-        
-        // can't fight if attacker can't go where target is.  E.g. A fish can't attack person on land.
-        if (distToTarget > rangeAttack
-                && !actorClass.isNpc() && !MWMechanics::isEnvironmentCompatible(actor, target))
-        {
-            // TODO: start fleeing?
-            storage.stopAttack();
-            return;
-        }
+        storage.mReadyToAttack = (currentAction->isAttackingOrSpell() && distToTarget <= rangeAttack && storage.mLOS);
 
         if (storage.mReadyToAttack)
         {
@@ -265,6 +256,112 @@ namespace MWMechanics
                 storage.mMovement.mRotation[2] = getZAngleToDir((vTargetPos-vActorPos)); // using vAimDir results in spastic movements since the head is animated
             }
         }
+        return false;
+    }
+
+    void MWMechanics::AiCombat::updateLOS(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration, MWMechanics::AiCombatStorage& storage)
+    {
+        static const float LOS_UPDATE_DURATION = 0.5f;
+        if (storage.mUpdateLOSTimer <= 0.f)
+        {
+            storage.mLOS = MWBase::Environment::get().getWorld()->getLOS(actor, target);
+            storage.mUpdateLOSTimer = LOS_UPDATE_DURATION;
+        }
+        else
+            storage.mUpdateLOSTimer -= duration;
+    }
+
+    void MWMechanics::AiCombat::updateFleeing(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration, MWMechanics::AiCombatStorage& storage)
+    {
+        static const float BLIND_RUN_DURATION = 1.0f;
+
+        updateLOS(actor, target, duration, storage);
+
+        AiCombatStorage::FleeState& state = storage.mFleeState;
+        switch (state)
+        {
+            case AiCombatStorage::FleeState_None:
+                return;
+
+            case AiCombatStorage::FleeState_Idle:
+                {
+                    float triggerDist = getMaxAttackDistance(target);
+
+                    if (storage.mLOS &&
+                            (triggerDist >= 1000 || getDistanceMinusHalfExtents(actor, target) <= triggerDist))
+                    {
+                        const ESM::Pathgrid* pathgrid =
+                                MWBase::Environment::get().getWorld()->getStore().get<ESM::Pathgrid>().search(*storage.mCell->getCell());
+
+                        bool runFallback = true;
+
+                        if (pathgrid && !actor.getClass().isPureWaterCreature(actor))
+                        {
+                            ESM::Pathgrid::PointList points;
+                            CoordinateConverter coords(storage.mCell->getCell());
+
+                            osg::Vec3f localPos = actor.getRefData().getPosition().asVec3();
+                            coords.toLocal(localPos);
+
+                            int closestPointIndex = PathFinder::GetClosestPoint(pathgrid, localPos);
+                            for (int i = 0; i < static_cast<int>(pathgrid->mPoints.size()); i++)
+                            {
+                                if (i != closestPointIndex && getPathGridGraph(storage.mCell).isPointConnected(closestPointIndex, i))
+                                {
+                                    points.push_back(pathgrid->mPoints[static_cast<size_t>(i)]);
+                                }
+                            }
+
+                            if (!points.empty())
+                            {
+                                ESM::Pathgrid::Point dest = points[Misc::Rng::rollDice(points.size())];
+                                coords.toWorld(dest);
+
+                                state = AiCombatStorage::FleeState_RunToDestination;
+                                storage.mFleeDest = ESM::Pathgrid::Point(dest.mX, dest.mY, dest.mZ);
+
+                                runFallback = false;
+                            }
+                        }
+
+                        if (runFallback)
+                        {
+                            state = AiCombatStorage::FleeState_RunBlindly;
+                            storage.mFleeBlindRunTimer = 0.0f;
+                        }
+                    }
+                }
+                break;
+
+            case AiCombatStorage::FleeState_RunBlindly:
+                {
+                    // timer to prevent twitchy movement that can be observed in vanilla MW
+                    if (storage.mFleeBlindRunTimer < BLIND_RUN_DURATION)
+                    {
+                        storage.mFleeBlindRunTimer += duration;
+
+                        storage.mMovement.mRotation[2] = osg::PI + getZAngleToDir(target.getRefData().getPosition().asVec3()-actor.getRefData().getPosition().asVec3());
+                        storage.mMovement.mPosition[1] = 1;
+                        updateActorsMovement(actor, duration, storage);
+                    }
+                    else
+                        state = AiCombatStorage::FleeState_Idle;
+                }
+                break;
+
+            case AiCombatStorage::FleeState_RunToDestination:
+                {
+                    static const float fFleeDistance = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fFleeDistance")->getFloat();
+
+                    float dist = (actor.getRefData().getPosition().asVec3() - target.getRefData().getPosition().asVec3()).length();
+                    if ((dist > fFleeDistance && !storage.mLOS)
+                            || pathTo(actor, storage.mFleeDest, duration))
+                    {
+                        state = AiCombatStorage::FleeState_Idle;
+                    }
+                }
+                break;
+        };
     }
 
     void AiCombat::updateActorsMovement(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage)
@@ -316,7 +413,7 @@ namespace MWMechanics
 
     void AiCombat::writeState(ESM::AiSequence::AiSequence &sequence) const
     {
-        std::auto_ptr<ESM::AiSequence::AiCombat> combat(new ESM::AiSequence::AiCombat());
+        std::unique_ptr<ESM::AiSequence::AiCombat> combat(new ESM::AiSequence::AiCombat());
         combat->mTargetActorId = mTargetActorId;
 
         ESM::AiSequence::AiPackageContainer package;
@@ -327,6 +424,22 @@ namespace MWMechanics
 
     void AiCombatStorage::startCombatMove(bool isDistantCombat, float distToTarget, float rangeAttack, const MWWorld::Ptr& actor, const MWWorld::Ptr& target)
     {
+        // get the range of the target's weapon
+        MWWorld::Ptr targetWeapon = MWWorld::Ptr();
+        const MWWorld::Class& targetClass = target.getClass();
+
+        if (targetClass.hasInventoryStore(target))
+        {
+            MWMechanics::WeaponType weapType = WeapType_None;
+            MWWorld::ContainerStoreIterator weaponSlot =
+                MWMechanics::getActiveWeapon(targetClass.getCreatureStats(target), targetClass.getInventoryStore(target), &weapType);
+            if (weapType != WeapType_PickProbe && weapType != WeapType_Spell && weapType != WeapType_None && weapType != WeapType_HandToHand)
+                targetWeapon = *weaponSlot;
+        }
+
+        bool targetUsesRanged = false;
+        float rangeAttackOfTarget = ActionWeapon(targetWeapon).getCombatRange(targetUsesRanged);
+        
         if (mMovement.mPosition[0] || mMovement.mPosition[1])
         {
             mTimerCombatMove = 0.1f + 0.1f * Misc::Rng::rollClosedProbability();
@@ -335,26 +448,6 @@ namespace MWMechanics
         // dodge movements (for NPCs and bipedal creatures)
         else if (actor.getClass().isBipedal(actor))
         {
-            // get the range of the target's weapon
-            float rangeAttackOfTarget = 0.f;
-            bool isRangedCombat = false;
-            MWWorld::Ptr targetWeapon = MWWorld::Ptr();         
-            const MWWorld::Class& targetClass = target.getClass();
-
-            if (targetClass.hasInventoryStore(target))
-            {
-                MWMechanics::WeaponType weapType = WeapType_None;
-                MWWorld::ContainerStoreIterator weaponSlot =
-                    MWMechanics::getActiveWeapon(targetClass.getCreatureStats(target), targetClass.getInventoryStore(target), &weapType);
-                if (weapType != WeapType_PickProbe && weapType != WeapType_Spell && weapType != WeapType_None && weapType != WeapType_HandToHand)
-                    targetWeapon = *weaponSlot;
-            }
-
-            boost::shared_ptr<Action> targetWeaponAction (new ActionWeapon(targetWeapon));
-
-            if (targetWeaponAction.get())
-                rangeAttackOfTarget = targetWeaponAction->getCombatRange(isRangedCombat);
-              
             // apply sideway movement (kind of dodging) with some probability
             // if actor is within range of target's weapon
             if (distToTarget <= rangeAttackOfTarget && Misc::Rng::rollClosedProbability() < 0.25)
@@ -365,12 +458,18 @@ namespace MWMechanics
             }
         }
 
-        // Below behavior for backing up during ranged combat differs from vanilla.
-        // Vanilla is observed as backing up only as far as fCombatDistance or
-        // opponent's weapon range, or not backing up if opponent is also using a ranged weapon
-        if (isDistantCombat && distToTarget < rangeAttack / 4)
+        // Backing up behaviour
+        // Actor backs up slightly further away than opponent's weapon range
+        // (in vanilla - only as far as oponent's weapon range),
+        // or not at all if opponent is using a ranged weapon
+        if (isDistantCombat)
         {
-            mMovement.mPosition[1] = -1;
+            // actor should not back up into water
+            if (MWBase::Environment::get().getWorld()->isUnderwater(MWWorld::ConstPtr(actor), 0.5f))
+                return;
+
+            if (!targetUsesRanged && distToTarget <= rangeAttackOfTarget*1.5) // Don't back up if the target is wielding ranged weapon
+                mMovement.mPosition[1] = -1;
         }
     }
 
@@ -445,6 +544,26 @@ namespace MWMechanics
         mMovement.mPosition[2] = 0;
         mReadyToAttack = false;
         mAttack = false;
+    }
+
+    void AiCombatStorage::startFleeing()
+    {
+        stopFleeing();
+        mFleeState = FleeState_Idle;
+    }
+
+    void AiCombatStorage::stopFleeing()
+    {
+        mMovement.mPosition[0] = 0;
+        mMovement.mPosition[1] = 0;
+        mMovement.mPosition[2] = 0;
+        mFleeState = FleeState_None;
+        mFleeDest = ESM::Pathgrid::Point(0, 0, 0);
+    }
+
+    bool AiCombatStorage::isFleeing()
+    {
+        return mFleeState != FleeState_None;
     }
 }
 

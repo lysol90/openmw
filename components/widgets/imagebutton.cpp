@@ -5,6 +5,22 @@
 namespace Gui
 {
 
+    bool ImageButton::sDefaultNeedKeyFocus = true;
+
+    ImageButton::ImageButton()
+        : Base()
+        , mMouseFocus(false)
+        , mMousePress(false)
+        , mKeyFocus(false)
+    {
+        setNeedKeyFocus(sDefaultNeedKeyFocus);
+    }
+
+    void ImageButton::setDefaultNeedKeyFocus(bool enabled)
+    {
+        sDefaultNeedKeyFocus = enabled;
+    }
+
     void ImageButton::setPropertyOverride(const std::string &_key, const std::string &_value)
     {
         if (_key == "ImageHighlighted")
@@ -24,22 +40,36 @@ namespace Gui
     }
     void ImageButton::onMouseSetFocus(Widget* _old)
     {
-        setImageTexture(mImageHighlighted);
-        ImageBox::onMouseSetFocus(_old);
+        mMouseFocus = true;
+        updateImage();
+        Base::onMouseSetFocus(_old);
     }
 
     void ImageButton::onMouseLostFocus(Widget* _new)
     {
-        setImageTexture(mImageNormal);
-        ImageBox::onMouseLostFocus(_new);
+        mMouseFocus = false;
+        updateImage();
+        Base::onMouseLostFocus(_new);
     }
 
     void ImageButton::onMouseButtonPressed(int _left, int _top, MyGUI::MouseButton _id)
     {
         if (_id == MyGUI::MouseButton::Left)
-            setImageTexture(mImagePushed);
+        {
+            mMousePress = true;
+            updateImage();
+        }
+        Base::onMouseButtonPressed(_left, _top, _id);
+    }
 
-        ImageBox::onMouseButtonPressed(_left, _top, _id);
+    void ImageButton::updateImage()
+    {
+        if (mMousePress)
+            setImageTexture(mImagePushed);
+        else if (mMouseFocus || mKeyFocus)
+            setImageTexture(mImageHighlighted);
+        else
+            setImageTexture(mImageNormal);
     }
 
     MyGUI::IntSize ImageButton::getRequestedSize()
@@ -70,8 +100,23 @@ namespace Gui
     void ImageButton::onMouseButtonReleased(int _left, int _top, MyGUI::MouseButton _id)
     {
         if (_id == MyGUI::MouseButton::Left)
-            setImageTexture(mImageHighlighted);
+        {
+            mMousePress = false;
+            updateImage();
+        }
 
-        ImageBox::onMouseButtonReleased(_left, _top, _id);
+        Base::onMouseButtonReleased(_left, _top, _id);
+    }
+
+    void ImageButton::onKeySetFocus(MyGUI::Widget *_old)
+    {
+        mKeyFocus = true;
+        updateImage();
+    }
+
+    void ImageButton::onKeyLostFocus(MyGUI::Widget *_new)
+    {
+        mKeyFocus = false;
+        updateImage();
     }
 }

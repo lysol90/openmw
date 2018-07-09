@@ -4,9 +4,16 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <iostream>
 
 #include <osg/ref_ptr>
 #include <osg/Vec4f>
+#include <osg/Uniform>
+
+namespace osg
+{
+    class Camera;
+}
 
 namespace osg
 {
@@ -57,6 +64,9 @@ namespace MWRender
         osg::Vec4f mSunDiscColor;
 
         float mFogDepth;
+
+        float mDLFogFactor;
+        float mDLFogOffset;
 
         float mWindSpeed;
 
@@ -137,6 +147,10 @@ namespace MWRender
 
         void sunDisable();
 
+        bool isEnabled();
+
+        bool hasRain();
+
         void setRainSpeed(float speed);
 
         void setStormDirection(const osg::Vec3f& direction);
@@ -156,6 +170,10 @@ namespace MWRender
 
         void listAssetsToPreload(std::vector<std::string>& models, std::vector<std::string>& textures);
 
+        void setCamera(osg::Camera *camera);
+
+        void setRainIntensityUniform(osg::Uniform *uniform);
+
     private:
         void create();
         ///< no need to call this, automatically done on first enable()
@@ -165,6 +183,9 @@ namespace MWRender
         void updateRainParameters();
 
         Resource::SceneManager* mSceneManager;
+
+        osg::Camera *mCamera;
+        osg::Uniform *mRainIntensityUniform;
 
         osg::ref_ptr<osg::Group> mRootNode;
         osg::ref_ptr<osg::Group> mEarlyRenderBinRoot;
@@ -189,9 +210,9 @@ namespace MWRender
 
         osg::ref_ptr<AtmosphereUpdater> mAtmosphereUpdater;
 
-        std::auto_ptr<Sun> mSun;
-        std::auto_ptr<Moon> mMasser;
-        std::auto_ptr<Moon> mSecunda;
+        std::unique_ptr<Sun> mSun;
+        std::unique_ptr<Moon> mMasser;
+        std::unique_ptr<Moon> mSecunda;
 
         osg::ref_ptr<osg::Group> mRainNode;
         osg::ref_ptr<osgParticle::ParticleSystem> mRainParticleSystem;
@@ -211,7 +232,7 @@ namespace MWRender
 
         osg::Vec3f mStormDirection;
 
-        // remember some settings so we don't have to apply them again if they didnt change
+        // remember some settings so we don't have to apply them again if they didn't change
         std::string mClouds;
         std::string mNextClouds;
         float mCloudBlendFactor;
@@ -233,6 +254,8 @@ namespace MWRender
 
         bool mEnabled;
         bool mSunEnabled;
+
+        float mWeatherAlpha;
 
         osg::Vec4f mMoonScriptColor;
     };

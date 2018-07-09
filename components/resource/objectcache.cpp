@@ -34,6 +34,11 @@ ObjectCache::~ObjectCache()
 
 void ObjectCache::addEntryToObjectCache(const std::string& filename, osg::Object* object, double timestamp)
 {
+    if (!object)
+    {
+        OSG_ALWAYS << " trying to add NULL object to cache for " << filename << std::endl;
+        return;
+    }
     OpenThreads::ScopedLock<OpenThreads::Mutex> lock(_objectCacheMutex);
     _objectCache[filename]=ObjectTimeStampPair(object,timestamp);
 }
@@ -47,6 +52,18 @@ osg::ref_ptr<osg::Object> ObjectCache::getRefFromObjectCache(const std::string& 
         return itr->second.first;
     }
     else return 0;
+}
+
+bool ObjectCache::checkInObjectCache(const std::string &fileName, double timeStamp)
+{
+    OpenThreads::ScopedLock<OpenThreads::Mutex> lock(_objectCacheMutex);
+    ObjectCacheMap::iterator itr = _objectCache.find(fileName);
+    if (itr!=_objectCache.end())
+    {
+        itr->second.second = timeStamp;
+        return true;
+    }
+    else return false;
 }
 
 void ObjectCache::updateTimeStampOfObjectsInCacheWithExternalReferences(double referenceTime)
@@ -136,6 +153,12 @@ void ObjectCache::accept(osg::NodeVisitor &nv)
                 node->accept(nv);
         }
     }
+}
+
+unsigned int ObjectCache::getCacheSize() const
+{
+    OpenThreads::ScopedLock<OpenThreads::Mutex> lock(_objectCacheMutex);
+    return _objectCache.size();
 }
 
 }

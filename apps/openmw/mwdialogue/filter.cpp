@@ -107,12 +107,24 @@ bool MWDialogue::Filter::testActor (const ESM::DialInfo& info) const
 bool MWDialogue::Filter::testPlayer (const ESM::DialInfo& info) const
 {
     const MWWorld::Ptr player = MWMechanics::getPlayer();
+    MWMechanics::NpcStats& stats = player.getClass().getNpcStats (player);
 
-    // check player faction
+    // check player faction and rank
     if (!info.mPcFaction.empty())
     {
-        MWMechanics::NpcStats& stats = player.getClass().getNpcStats (player);
         std::map<std::string,int>::const_iterator iter = stats.getFactionRanks().find (Misc::StringUtils::lowerCase (info.mPcFaction));
+
+        if(iter==stats.getFactionRanks().end())
+            return false;
+
+        // check rank
+        if (iter->second < info.mData.mPCrank)
+            return false;
+    }
+    else if (info.mData.mPCrank != -1)
+    {
+        // required PC faction is not specified but PC rank is; use speaker's faction
+        std::map<std::string,int>::const_iterator iter = stats.getFactionRanks().find (Misc::StringUtils::lowerCase (mActor.getClass().getPrimaryFaction(mActor)));
 
         if(iter==stats.getFactionRanks().end())
             return false;
@@ -181,7 +193,8 @@ bool MWDialogue::Filter::testFunctionLocal(const MWDialogue::SelectWrapper& sele
         return false; // shouldn't happen, we checked that variable has a type above, so must exist
 
     const MWScript::Locals& locals = mActor.getRefData().getLocals();
-
+    if (locals.isEmpty())
+        return select.selectCompare(0);
     switch (type)
     {
         case 's': return select.selectCompare (static_cast<int> (locals.mShorts[index]));
@@ -332,13 +345,13 @@ int MWDialogue::Filter::getSelectStructInteger (const SelectWrapper& select) con
 
         case SelectWrapper::Function_PcClothingModifier:
         {
-            MWWorld::InventoryStore& store = player.getClass().getInventoryStore (player);
+            const MWWorld::InventoryStore& store = player.getClass().getInventoryStore (player);
 
             int value = 0;
 
             for (int i=0; i<=15; ++i) // everything except things held in hands and ammunition
             {
-                MWWorld::ContainerStoreIterator slot = store.getSlot (i);
+                MWWorld::ConstContainerStoreIterator slot = store.getSlot (i);
 
                 if (slot!=store.end())
                     value += slot->getClass().getValue (*slot);
@@ -478,10 +491,11 @@ bool MWDialogue::Filter::getSelectStructBoolean (const SelectWrapper& select) co
             return !Misc::StringUtils::ciEqual(mActor.get<ESM::NPC>()->mBase->mRace, select.getName());
 
         case SelectWrapper::Function_NotCell:
-
-            return !Misc::StringUtils::ciEqual(MWBase::Environment::get().getWorld()->getCellName(mActor.getCell())
-                                               , select.getName());
-
+            {
+                const std::string& actorCell = MWBase::Environment::get().getWorld()->getCellName(mActor.getCell());
+                return !(actorCell.length() >= select.getName().length()
+                      && Misc::StringUtils::ciEqual(actorCell.substr(0, select.getName().length()), select.getName()));
+            }
         case SelectWrapper::Function_SameGender:
 
             return (player.get<ESM::NPC>()->mBase->mFlags & ESM::NPC::Female)==

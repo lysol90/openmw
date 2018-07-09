@@ -1,9 +1,12 @@
 #ifndef MWMECHANICS_SPELLSUCCESS_H
 #define MWMECHANICS_SPELLSUCCESS_H
 
+#include <components/esm/effectlist.hpp>
 #include <components/esm/loadskil.hpp>
 
 #include "../mwworld/ptr.hpp"
+
+#include "magiceffects.hpp"
 
 namespace ESM
 {
@@ -21,6 +24,8 @@ namespace MWMechanics
 
     ESM::Skill::SkillEnum spellSchoolToSkill(int school);
 
+    float calcEffectCost(const ESM::ENAMstruct& effect);
+
     bool isSummoningEffect(int effectId);
 
     /**
@@ -28,11 +33,12 @@ namespace MWMechanics
      * @param actor calculate spell success chance for this actor (depends on actor's skills)
      * @param effectiveSchool the spell's effective school (relevant for skill progress) will be written here
      * @param cap cap the result to 100%?
+     * @param checkMagicka check magicka?
      * @note actor can be an NPC or a creature
      * @return success chance from 0 to 100 (in percent), if cap=false then chance above 100 may be returned.
      */
-    float getSpellSuccessChance (const ESM::Spell* spell, const MWWorld::Ptr& actor, int* effectiveSchool = NULL, bool cap=true);
-    float getSpellSuccessChance (const std::string& spellId, const MWWorld::Ptr& actor, int* effectiveSchool = NULL, bool cap=true);
+    float getSpellSuccessChance (const ESM::Spell* spell, const MWWorld::Ptr& actor, int* effectiveSchool = NULL, bool cap=true, bool checkMagicka=false);
+    float getSpellSuccessChance (const std::string& spellId, const MWWorld::Ptr& actor, int* effectiveSchool = NULL, bool cap=true, bool checkMagicka=false);
 
     int getSpellSchool(const std::string& spellId, const MWWorld::Ptr& actor);
     int getSpellSchool(const ESM::Spell* spell, const MWWorld::Ptr& actor);
@@ -59,9 +65,16 @@ namespace MWMechanics
     float getEffectMultiplier(short effectId, const MWWorld::Ptr& actor, const MWWorld::Ptr& caster,
                               const ESM::Spell* spell = NULL, const MagicEffects* effects = NULL);
 
-    int getEffectiveEnchantmentCastCost (float castCost, const MWWorld::Ptr& actor);
+    bool checkEffectTarget (int effectId, const MWWorld::Ptr& target, const MWWorld::Ptr& caster, bool castByPlayer);
 
-    void effectTick(CreatureStats& creatureStats, const MWWorld::Ptr& actor, const MWMechanics::EffectKey& effectKey, float magnitude);
+    int getEffectiveEnchantmentCastCost (float castCost, const MWWorld::Ptr& actor);
+    float calcSpellBaseSuccessChance (const ESM::Spell* spell, const MWWorld::Ptr& actor, int* effectiveSchool);
+
+    /// Apply a magic effect that is applied in tick intervals until its remaining time ends or it is removed
+    /// @return Was the effect a tickable effect with a magnitude?
+    bool effectTick(CreatureStats& creatureStats, const MWWorld::Ptr& actor, const MWMechanics::EffectKey& effectKey, float magnitude);
+
+    std::string getSummonedCreature(int effectId);
 
     class CastSpell
     {
@@ -74,9 +87,10 @@ namespace MWMechanics
         std::string mSourceName; // Display name for spell, potion, etc
         osg::Vec3f mHitPosition; // Used for spawning area orb
         bool mAlwaysSucceed; // Always succeed spells casted by NPCs/creatures regardless of their chance (default: false)
+        bool mFromProjectile; // True if spell is cast by enchantment of some projectile (arrow, bolt or thrown weapon)
 
     public:
-        CastSpell(const MWWorld::Ptr& caster, const MWWorld::Ptr& target);
+        CastSpell(const MWWorld::Ptr& caster, const MWWorld::Ptr& target, const bool fromProjectile=false);
 
         bool cast (const ESM::Spell* spell);
 
@@ -95,7 +109,7 @@ namespace MWMechanics
         void playSpellCastingEffects(const std::string &spellid);
 
         /// Launch a bolt with the given effects.
-        void launchMagicBolt (const ESM::EffectList& effects);
+        void launchMagicBolt ();
 
         /// @note \a target can be any type of object, not just actors.
         /// @note \a caster can be any type of object, or even an empty object.
@@ -107,6 +121,21 @@ namespace MWMechanics
         bool applyInstantEffect (const MWWorld::Ptr& target, const MWWorld::Ptr& caster, const MWMechanics::EffectKey& effect, float magnitude);
     };
 
+    class ApplyLoopingParticlesVisitor : public EffectSourceVisitor
+    {
+    private:
+        MWWorld::Ptr mActor;
+
+    public:
+        ApplyLoopingParticlesVisitor(const MWWorld::Ptr& actor)
+            : mActor(actor)
+        {
+        }
+
+        virtual void visit (MWMechanics::EffectKey key,
+                            const std::string& /*sourceName*/, const std::string& /*sourceId*/, int /*casterActorId*/,
+                            float /*magnitude*/, float /*remainingTime*/ = -1, float /*totalTime*/ = -1);
+    };
 }
 
 #endif

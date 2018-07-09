@@ -6,14 +6,20 @@
 #include <components/esm/loadclas.hpp>
 #include <components/esm/loadskil.hpp>
 
+#include "../prefs/state.hpp"
+
 #include "../world/universalid.hpp"
 
 CSMTools::ClassCheckStage::ClassCheckStage (const CSMWorld::IdCollection<ESM::Class>& classes)
 : mClasses (classes)
-{}
+{
+    mIgnoreBaseRecords = false;
+}
 
 int CSMTools::ClassCheckStage::setup()
 {
+    mIgnoreBaseRecords = CSMPrefs::get()["Reports"]["ignore-base-records"].isTrue();
+
     return mClasses.getSize();
 }
 
@@ -21,19 +27,21 @@ void CSMTools::ClassCheckStage::perform (int stage, CSMDoc::Messages& messages)
 {
     const CSMWorld::Record<ESM::Class>& record = mClasses.getRecord (stage);
 
-    if (record.isDeleted())
+    // Skip "Base" records (setting!) and "Deleted" records
+    if ((mIgnoreBaseRecords && record.mState == CSMWorld::RecordBase::State_BaseOnly) || record.isDeleted())
         return;
 
     const ESM::Class& class_ = record.get();
 
     CSMWorld::UniversalId id (CSMWorld::UniversalId::Type_Class, class_.mId);
 
-    // test for empty name and description
+    // A class should have a name
     if (class_.mName.empty())
-        messages.push_back (std::make_pair (id, class_.mId + " has an empty name"));
+        messages.push_back (std::make_pair (id, class_.mId + " doesn't have a name"));
 
-    if (class_.mDescription.empty())
-        messages.push_back (std::make_pair (id, class_.mId + " has an empty description"));
+    // A playable class should have a description
+    if (class_.mData.mIsPlayable != 0 && class_.mDescription.empty())
+        messages.push_back (std::make_pair (id, class_.mId + " doesn't have a description and it's playable"));
 
     // test for invalid attributes
     for (int i=0; i<2; ++i)

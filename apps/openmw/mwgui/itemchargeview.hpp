@@ -64,12 +64,12 @@ namespace MWGui
             void updateLine(const Line& line);
 
             void onIconClicked(MyGUI::Widget* sender);
-            void onMouseWheel(MyGUI::Widget* sender, int rel);
+            void onMouseWheelMoved(MyGUI::Widget* sender, int rel);
 
             typedef std::vector<Line> Lines;
             Lines mLines;
 
-            std::auto_ptr<ItemModel> mModel;
+            std::unique_ptr<ItemModel> mModel;
             MyGUI::ScrollView* mScrollView;
             DisplayMode mDisplayMode;
     };

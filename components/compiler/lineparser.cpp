@@ -294,7 +294,7 @@ namespace Compiler
                     {
                         // workaround for broken positioncell instructions.
                         /// \todo add option to disable this
-                        std::auto_ptr<ErrorDowngrade> errorDowngrade (0);
+                        std::unique_ptr<ErrorDowngrade> errorDowngrade (nullptr);
                         if (Misc::StringUtils::lowerCase (loc.mLiteral)=="positioncell")
                             errorDowngrade.reset (new ErrorDowngrade (getErrorHandler()));
 
@@ -512,7 +512,7 @@ namespace Compiler
             return true;
         }
 
-        if (code==Scanner::S_member && mState==PotentialExplicitState)
+        if (code==Scanner::S_member && mState==PotentialExplicitState && mAllowExpression)
         {
             mState = MemberState;
             parseExpression (scanner, loc);

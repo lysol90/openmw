@@ -66,7 +66,7 @@ namespace CSMWorld
             { ColumnId_SleepForbidden, "Sleep Forbidden" },
             { ColumnId_InteriorWater, "Interior Water" },
             { ColumnId_InteriorSky, "Interior Sky" },
-            { ColumnId_Model, "Model" },
+            { ColumnId_Model, "Model/Animation" },
             { ColumnId_Script, "Script" },
             { ColumnId_Icon, "Icon" },
             { ColumnId_Weight, "Weight" },
@@ -98,22 +98,22 @@ namespace CSMWorld
             { ColumnId_ArmorType, "Armor Type" },
             { ColumnId_Health, "Health" },
             { ColumnId_ArmorValue, "Armor Value" },
-            { ColumnId_Scroll, "Scroll" },
+            { ColumnId_BookType, "Book Type" },
             { ColumnId_ClothingType, "Clothing Type" },
             { ColumnId_WeightCapacity, "Weight Capacity" },
             { ColumnId_OrganicContainer, "Organic Container" },
             { ColumnId_Respawn, "Respawn" },
             { ColumnId_CreatureType, "Creature Type" },
             { ColumnId_SoulPoints, "Soul Points" },
-            { ColumnId_OriginalCreature, "Original Creature" },
+            { ColumnId_ParentCreature, "Parent Creature" },
             { ColumnId_Biped, "Biped" },
             { ColumnId_HasWeapon, "Has Weapon" },
             { ColumnId_Swims, "Swims" },
             { ColumnId_Flies, "Flies" },
             { ColumnId_Walks, "Walks" },
             { ColumnId_Essential, "Essential" },
-            { ColumnId_SkeletonBlood, "Skeleton Blood" },
-            { ColumnId_MetalBlood, "Metal Blood" },
+            { ColumnId_BloodType, "Blood Type" },
+
             { ColumnId_OpenSound, "Open Sound" },
             { ColumnId_CloseSound, "Close Sound" },
             { ColumnId_Duration, "Duration" },
@@ -123,10 +123,8 @@ namespace CSMWorld
             { ColumnId_Dynamic, "Dynamic" },
             { ColumnId_Portable, "Portable" },
             { ColumnId_NegativeLight, "Negative Light" },
-            { ColumnId_Flickering, "Flickering" },
-            { ColumnId_SlowFlickering, "Slow Flickering" },
-            { ColumnId_Pulsing, "Pulsing" },
-            { ColumnId_SlowPulsing, "Slow Pulsing" },
+            { ColumnId_EmitterType, "Emitter Type" },
+
             { ColumnId_Fire, "Fire" },
             { ColumnId_OffByDefault, "Off by default" },
             { ColumnId_IsKey, "Is Key" },
@@ -285,6 +283,7 @@ namespace CSMWorld
             { ColumnId_NpcMisc, "NPC Misc" },
             { ColumnId_Level, "Level" },
             { ColumnId_NpcFactionID, "Faction ID" },
+            { ColumnId_GenderNpc, "Gender"},
             { ColumnId_Mana, "Mana" },
             { ColumnId_Fatigue, "Fatigue" },
             { ColumnId_NpcDisposition, "NPC Disposition" },
@@ -329,6 +328,16 @@ namespace CSMWorld
             { ColumnId_RegionWeather, "Weather" },
             { ColumnId_WeatherName, "Type" },
             { ColumnId_WeatherChance, "Percent Chance" },
+
+            { ColumnId_Text, "Text" },
+            { ColumnId_TextureNickname, "Texture Nickname" },
+            { ColumnId_PluginIndex, "Plugin Index" },
+            { ColumnId_TextureIndex, "Texture Index" },
+            { ColumnId_LandMapLodIndex, "Land map height LOD" },
+            { ColumnId_LandNormalsIndex, "Land normals" },
+            { ColumnId_LandHeightsIndex, "Land heights" },
+            { ColumnId_LandColoursIndex, "Land colors" },
+            { ColumnId_LandTexturesIndex, "Land textures" },
 
             { ColumnId_UseValue1, "Use value 1" },
             { ColumnId_UseValue2, "Use value 2" },
@@ -551,6 +560,21 @@ namespace
         "AI Wander", "AI Travel", "AI Follow", "AI Escort", "AI Activate", 0
     };
 
+    static const char *sBookType[] =
+    {
+        "Book", "Scroll", 0
+    };
+
+    static const char *sBloodType[] =
+    {
+        "Default (Red)", "Skeleton Blood (White)", "Metal Blood (Golden)", 0
+    };
+
+    static const char *sEmitterType[] =
+    {
+        "<None>", "Flickering", "Flickering (Slow)", "Pulsing", "Pulsing (Slow)", 0
+    };
+
     const char **getEnumNames (CSMWorld::Columns::ColumnId column)
     {
         switch (column)
@@ -580,6 +604,9 @@ namespace
             case CSMWorld::Columns::ColumnId_AiPackageType: return sAiPackageType;
             case CSMWorld::Columns::ColumnId_InfoCondFunc: return CSMWorld::ConstInfoSelectWrapper::FunctionEnumStrings;
             case CSMWorld::Columns::ColumnId_InfoCondComp: return CSMWorld::ConstInfoSelectWrapper::RelationEnumStrings;
+            case CSMWorld::Columns::ColumnId_BookType: return sBookType;
+            case CSMWorld::Columns::ColumnId_BloodType: return sBloodType;
+            case CSMWorld::Columns::ColumnId_EmitterType: return sEmitterType;
 
             default: return 0;
         }

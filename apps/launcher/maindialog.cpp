@@ -2,9 +2,7 @@
 
 #include <components/version/version.hpp>
 
-#include <QLabel>
 #include <QDate>
-#include <QTime>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QFontDatabase>
@@ -12,8 +10,6 @@
 #include <QFileDialog>
 #include <QCloseEvent>
 #include <QTextCodec>
-#include <QFile>
-#include <QDir>
 
 #include <QDebug>
 
@@ -21,6 +17,7 @@
 #include "graphicspage.hpp"
 #include "datafilespage.hpp"
 #include "settingspage.hpp"
+#include "advancedpage.hpp"
 
 using namespace Process;
 
@@ -104,6 +101,12 @@ void Launcher::MainDialog::createIcons()
     settingsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     settingsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
+    QListWidgetItem *advancedButton = new QListWidgetItem(iconWidget);
+    advancedButton->setIcon(QIcon::fromTheme("emblem-system"));
+    advancedButton->setText(tr("Advanced"));
+    advancedButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
+    advancedButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+
     connect(iconWidget,
             SIGNAL(currentItemChanged(QListWidgetItem*,QListWidgetItem*)),
             this, SLOT(changePage(QListWidgetItem*,QListWidgetItem*)));
@@ -116,6 +119,7 @@ void Launcher::MainDialog::createPages()
     mDataFilesPage = new DataFilesPage(mCfgMgr, mGameSettings, mLauncherSettings, this);
     mGraphicsPage = new GraphicsPage(mCfgMgr, mEngineSettings, this);
     mSettingsPage = new SettingsPage(mCfgMgr, mGameSettings, mLauncherSettings, this);
+    mAdvancedPage = new AdvancedPage(mCfgMgr, mGameSettings, mEngineSettings, this);
 
     // Set the combobox of the play page to imitate the combobox on the datafilespage
     mPlayPage->setProfilesModel(mDataFilesPage->profilesModel());
@@ -126,6 +130,7 @@ void Launcher::MainDialog::createPages()
     pagesWidget->addWidget(mDataFilesPage);
     pagesWidget->addWidget(mGraphicsPage);
     pagesWidget->addWidget(mSettingsPage);
+    pagesWidget->addWidget(mAdvancedPage);
 
     // Select the first page
     iconWidget->setCurrentItem(iconWidget->item(0), QItemSelectionModel::Select);
@@ -134,6 +139,8 @@ void Launcher::MainDialog::createPages()
 
     connect(mPlayPage, SIGNAL(signalProfileChanged(int)), mDataFilesPage, SLOT(slotProfileChanged(int)));
     connect(mDataFilesPage, SIGNAL(signalProfileChanged(int)), mPlayPage, SLOT(setProfilesIndex(int)));
+    // Using Qt::QueuedConnection because signal is emitted in a subthread and slot is in the main thread
+    connect(mDataFilesPage, SIGNAL(signalLoadedCellsChanged(QStringList)), mAdvancedPage, SLOT(slotLoadedCellsChanged(QStringList)), Qt::QueuedConnection);
 
 }
 
@@ -172,7 +179,10 @@ Launcher::FirstRunDialogResult Launcher::MainDialog::showFirstRunDialog()
         }
     }
 
-    return setup() ? FirstRunDialogResultContinue : FirstRunDialogResultFailure;
+    if (!setup() || !setupGameData()) {
+        return FirstRunDialogResultFailure;
+    }
+    return FirstRunDialogResultContinue;
 }
 
 void Launcher::MainDialog::setVersionLabel()
@@ -240,6 +250,9 @@ bool Launcher::MainDialog::reloadSettings()
         return false;
 
     if (!mGraphicsPage->loadSettings())
+        return false;
+
+    if (!mAdvancedPage->loadSettings())
         return false;
 
     return true;
@@ -324,10 +337,10 @@ bool Launcher::MainDialog::setupGameSettings()
     paths.append(localPath + QString("openmw.cfg"));
     paths.append(userPath + QString("openmw.cfg"));
 
-    foreach (const QString &path, paths) {
-        qDebug() << "Loading config file:" << path.toUtf8().constData();
+    foreach (const QString &path2, paths) {
+        qDebug() << "Loading config file:" << path2.toUtf8().constData();
 
-        file.setFileName(path);
+        file.setFileName(path2);
         if (file.exists()) {
             if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
                 cfgError(tr("Error opening OpenMW configuration file"),
@@ -344,16 +357,21 @@ bool Launcher::MainDialog::setupGameSettings()
         file.close();
     }
 
+    return true;
+}
+
+bool Launcher::MainDialog::setupGameData()
+{
     QStringList dataDirs;
 
     // Check if the paths actually contain data files
-    foreach (const QString path, mGameSettings.getDataDirs()) {
-        QDir dir(path);
+    foreach (const QString path3, mGameSettings.getDataDirs()) {
+        QDir dir(path3);
         QStringList filters;
         filters << "*.esp" << "*.esm" << "*.omwgame" << "*.omwaddon";
 
         if (!dir.entryList(filters).isEmpty())
-            dataDirs.append(path);
+            dataDirs.append(path3);
     }
 
     if (dataDirs.isEmpty())
@@ -475,6 +493,7 @@ bool Launcher::MainDialog::writeSettings()
     mDataFilesPage->saveSettings();
     mGraphicsPage->saveSettings();
     mSettingsPage->saveSettings();
+    mAdvancedPage->saveSettings();
 
     QString userPath = QString::fromUtf8(mCfgMgr.getUserConfigPath().string().c_str());
     QDir dir(userPath);

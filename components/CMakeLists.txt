@@ -2,29 +2,29 @@ project (Components)
 
 # Version file
 set (VERSION_IN_FILE "${OpenMW_SOURCE_DIR}/files/version.in")
-set (VERSION_FILE "${OpenMW_BINARY_DIR}/resources/version")
+set (VERSION_FILE_PATH_BASE "${OpenMW_BINARY_DIR}")
+set (VERSION_FILE_PATH_RELATIVE resources/version)
 if (GIT_CHECKOUT)
-  add_custom_target (git-version
+    get_generator_is_multi_config(multi_config)
+    add_custom_target (git-version
        COMMAND ${CMAKE_COMMAND}
             -DGIT_EXECUTABLE=${GIT_EXECUTABLE}
             -DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}
             -DVERSION_IN_FILE=${VERSION_IN_FILE}
-            -DVERSION_FILE=${VERSION_FILE}
+            -DVERSION_FILE_PATH_BASE=${VERSION_FILE_PATH_BASE}
+            -DVERSION_FILE_PATH_RELATIVE=${VERSION_FILE_PATH_RELATIVE}
             -DOPENMW_VERSION_MAJOR=${OPENMW_VERSION_MAJOR}
             -DOPENMW_VERSION_MINOR=${OPENMW_VERSION_MINOR}
             -DOPENMW_VERSION_RELEASE=${OPENMW_VERSION_RELEASE}
             -DOPENMW_VERSION=${OPENMW_VERSION}
+            -DMACROSFILE=${CMAKE_SOURCE_DIR}/cmake/OpenMWMacros.cmake
+            "-DCMAKE_CONFIGURATION_TYPES=${CMAKE_CONFIGURATION_TYPES}"
+            -Dgenerator_is_multi_config_var=${multi_config}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/GitVersion.cmake
             VERBATIM)
 else (GIT_CHECKOUT)
-    configure_file(${VERSION_IN_FILE} ${VERSION_FILE})
+    configure_resource_file(${VERSION_IN_FILE} ${VERSION_FILE_PATH_BASE} ${VERSION_FILE_PATH_RELATIVE})
 endif (GIT_CHECKOUT)
-
-if (OPENGL_ES)
-    find_package(OpenGLES REQUIRED)
-else()
-    find_package(OpenGL REQUIRED)
-endif()
 
 # source files
 
@@ -41,7 +41,7 @@ add_component_dir (vfs
     )
 
 add_component_dir (resource
-    scenemanager keyframemanager imagemanager bulletshapemanager bulletshape niffilemanager objectcache multiobjectcache resourcesystem resourcemanager
+    scenemanager keyframemanager imagemanager bulletshapemanager bulletshape niffilemanager objectcache multiobjectcache resourcesystem resourcemanager stats
     )
 
 add_component_dir (shader
@@ -49,8 +49,8 @@ add_component_dir (shader
     )
 
 add_component_dir (sceneutil
-    clone attach visitor util statesetupdater controller skeleton riggeometry lightcontroller
-    lightmanager lightutil positionattitudetransform workqueue unrefqueue pathgridutil waterutil
+    clone attach visitor util statesetupdater controller skeleton riggeometry morphgeometry lightcontroller
+    lightmanager lightutil positionattitudetransform workqueue unrefqueue pathgridutil waterutil writescene serialize optimizer
     )
 
 add_component_dir (nif
@@ -114,7 +114,7 @@ add_component_dir (translation
     )
 
 add_component_dir (terrain
-    storage world buffercache defs terraingrid material
+    storage world buffercache defs terraingrid material terraindrawable texturemanager chunkmanager compositemaprenderer quadtreeworld quadtreenode viewdata cellborder
     )
 
 add_component_dir (loadinglistener
@@ -185,12 +185,6 @@ include_directories(${Bullet_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
 
 add_library(components STATIC ${COMPONENT_FILES} ${MOC_SRCS} ${ESM_UI_HDR})
 
-if (OPENGL_ES)
-    set(GL_LIB ${OPENGLES_gl_LIBRARY})
-else()
-    set(GL_LIB ${OPENGL_gl_LIBRARY})
-endif()
-
 target_link_libraries(components
     ${Boost_SYSTEM_LIBRARY}
     ${Boost_FILESYSTEM_LIBRARY}
@@ -202,13 +196,12 @@ target_link_libraries(components
     ${OSGUTIL_LIBRARIES}
     ${OSGDB_LIBRARIES}
     ${OSGVIEWER_LIBRARIES}
+    ${OSGTEXT_LIBRARIES}
     ${OSGGA_LIBRARIES}
-    ${OSGFX_LIBRARIES}
     ${OSGANIMATION_LIBRARIES}
     ${Bullet_LIBRARIES}
-    ${SDL2_LIBRARY}
-    # For MyGUI platform
-    ${GL_LIB}
+    ${SDL2_LIBRARIES}
+    ${OPENGL_gl_LIBRARY}
     ${MyGUI_LIBRARIES}
     )
 
@@ -223,7 +216,7 @@ if (USE_QT)
         ${QT_QTCORE_LIBRARY}
         ${QT_QTGUI_LIBRARY})
     else()
-        qt5_use_modules(components Widgets Core)
+        target_link_libraries(components Qt5::Widgets Qt5::Core)
     endif()
 endif()
 

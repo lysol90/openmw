@@ -49,7 +49,7 @@ BulletNifLoader::~BulletNifLoader()
 {
 }
 
-osg::ref_ptr<Resource::BulletShape> BulletNifLoader::load(const Nif::NIFFilePtr nif)
+osg::ref_ptr<Resource::BulletShape> BulletNifLoader::load(const Nif::NIFFilePtr& nif)
 {
     mShape = new Resource::BulletShape;
 
@@ -75,7 +75,7 @@ osg::ref_ptr<Resource::BulletShape> BulletNifLoader::load(const Nif::NIFFilePtr 
 
     if (findBoundingBox(node))
     {
-        std::auto_ptr<btCompoundShape> compound (new btCompoundShape);
+        std::unique_ptr<btCompoundShape> compound (new btCompoundShape);
 
         btBoxShape* boxShape = new btBoxShape(getbtVector(mShape->mCollisionBoxHalfExtents));
         btTransform transform = btTransform::getIdentity();
@@ -203,8 +203,7 @@ void BulletNifLoader::handleNode(const Nif::Node *node, int flags,
             // affecting the entire subtree of this node
             Nif::NiStringExtraData *sd = (Nif::NiStringExtraData*)e;
 
-            // not sure what the difference between NCO and NCC is, or if there even is one
-            if (sd->string == "NCO" || sd->string == "NCC")
+            if (Misc::StringUtils::ciCompareLen(sd->string, "NC", 2) == 0)
             {
                 // No collision. Use an internal flag setting to mark this.
                 flags |= 0x800;
@@ -246,11 +245,6 @@ void BulletNifLoader::handleNiTriShape(const Nif::NiTriShape *shape, int flags, 
 {
     assert(shape != NULL);
 
-    // Interpret flags
-    bool hidden    = (flags&Nif::NiNode::Flag_Hidden) != 0;
-    bool collide   = (flags&Nif::NiNode::Flag_MeshCollision) != 0;
-    bool bbcollide = (flags&Nif::NiNode::Flag_BBoxCollision) != 0;
-
     // If the object was marked "NCO" earlier, it shouldn't collide with
     // anything. So don't do anything.
     if ((flags & 0x800))
@@ -258,17 +252,12 @@ void BulletNifLoader::handleNiTriShape(const Nif::NiTriShape *shape, int flags, 
         return;
     }
 
-    if (!collide && !bbcollide && hidden)
-        // This mesh apparently isn't being used for anything, so don't
-        // bother setting it up.
-        return;
-
     if (!shape->skin.empty())
         isAnimated = false;
 
     if (shape->data.empty())
         return;
-    if (shape->data->triangles->empty())
+    if (shape->data->triangles.empty())
         return;
 
     if (isAnimated)
@@ -280,14 +269,13 @@ void BulletNifLoader::handleNiTriShape(const Nif::NiTriShape *shape, int flags, 
 
         const Nif::NiTriShapeData *data = shape->data.getPtr();
 
-        childMesh->preallocateVertices(data->vertices->size());
-        childMesh->preallocateIndices(data->triangles->size());
+        childMesh->preallocateVertices(data->vertices.size());
+        childMesh->preallocateIndices(data->triangles.size());
 
-        const osg::Vec3Array& vertices = *data->vertices;
-        const osg::DrawElementsUShort& triangles = *data->triangles;
+        const std::vector<osg::Vec3f> &vertices = data->vertices;
+        const std::vector<unsigned short> &triangles = data->triangles;
 
-        size_t numtris = data->triangles->size();
-        for(size_t i = 0;i < numtris;i+=3)
+        for(size_t i = 0;i < data->triangles.size();i+=3)
         {
             osg::Vec3f b1 = vertices[triangles[i+0]];
             osg::Vec3f b2 = vertices[triangles[i+1]];
@@ -321,13 +309,13 @@ void BulletNifLoader::handleNiTriShape(const Nif::NiTriShape *shape, int flags, 
 
         // Static shape, just transform all vertices into position
         const Nif::NiTriShapeData *data = shape->data.getPtr();
-        const osg::Vec3Array& vertices = *data->vertices;
-        const osg::DrawElementsUShort& triangles = *data->triangles;
+        const std::vector<osg::Vec3f> &vertices = data->vertices;
+        const std::vector<unsigned short> &triangles = data->triangles;
 
-        mStaticMesh->preallocateVertices(data->vertices->size());
-        mStaticMesh->preallocateIndices(data->triangles->size());
+        mStaticMesh->preallocateVertices(data->vertices.size());
+        mStaticMesh->preallocateIndices(data->triangles.size());
 
-        size_t numtris = data->triangles->size();
+        size_t numtris = data->triangles.size();
         for(size_t i = 0;i < numtris;i+=3)
         {
             osg::Vec3f b1 = vertices[triangles[i+0]]*transform;

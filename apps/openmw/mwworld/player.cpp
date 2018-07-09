@@ -47,37 +47,45 @@ namespace MWWorld
         mPlayer.mData.setPosition(playerPos);
     }
 
-    void Player::saveSkillsAttributes()
+    void Player::saveStats()
     {
         MWMechanics::NpcStats& stats = getPlayer().getClass().getNpcStats(getPlayer());
+
         for (int i=0; i<ESM::Skill::Length; ++i)
             mSaveSkills[i] = stats.getSkill(i);
         for (int i=0; i<ESM::Attribute::Length; ++i)
             mSaveAttributes[i] = stats.getAttribute(i);
     }
 
-    void Player::restoreSkillsAttributes()
-    {
-        MWMechanics::NpcStats& stats = getPlayer().getClass().getNpcStats(getPlayer());
-        for (int i=0; i<ESM::Skill::Length; ++i)
-            stats.setSkill(i, mSaveSkills[i]);
-        for (int i=0; i<ESM::Attribute::Length; ++i)
-            stats.setAttribute(i, mSaveAttributes[i]);
-    }
-
-    void Player::setWerewolfSkillsAttributes()
+    void Player::restoreStats()
     {
         const MWWorld::Store<ESM::GameSetting>& gmst = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
-        MWMechanics::NpcStats& stats = getPlayer().getClass().getNpcStats(getPlayer());
+        MWMechanics::CreatureStats& creatureStats = getPlayer().getClass().getCreatureStats(getPlayer());
+        MWMechanics::NpcStats& npcStats = getPlayer().getClass().getNpcStats(getPlayer());
+        MWMechanics::DynamicStat<float> health = creatureStats.getDynamic(0);
+        creatureStats.setHealth(int(health.getBase() / gmst.find("fWereWolfHealth")->getFloat()));
+        for (int i=0; i<ESM::Skill::Length; ++i)
+            npcStats.setSkill(i, mSaveSkills[i]);
+        for (int i=0; i<ESM::Attribute::Length; ++i)
+            npcStats.setAttribute(i, mSaveAttributes[i]);
+    }
+
+    void Player::setWerewolfStats()
+    {
+        const MWWorld::Store<ESM::GameSetting>& gmst = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
+        MWMechanics::CreatureStats& creatureStats = getPlayer().getClass().getCreatureStats(getPlayer());
+        MWMechanics::NpcStats& npcStats = getPlayer().getClass().getNpcStats(getPlayer());
+        MWMechanics::DynamicStat<float> health = creatureStats.getDynamic(0);
+        creatureStats.setHealth(int(health.getBase() * gmst.find("fWereWolfHealth")->getFloat()));
         for(size_t i = 0;i < ESM::Attribute::Length;++i)
         {
             // Oh, Bethesda. It's "Intelligence".
             std::string name = "fWerewolf"+((i==ESM::Attribute::Intelligence) ? std::string("Intellegence") :
                                             ESM::Attribute::sAttributeNames[i]);
 
-            MWMechanics::AttributeValue value = stats.getAttribute(i);
+            MWMechanics::AttributeValue value = npcStats.getAttribute(i);
             value.setBase(int(gmst.find(name)->getFloat()));
-            stats.setAttribute(i, value);
+            npcStats.setAttribute(i, value);
         }
 
         for(size_t i = 0;i < ESM::Skill::Length;i++)
@@ -90,9 +98,9 @@ namespace MWWorld
             std::string name = "fWerewolf"+((i==ESM::Skill::Mercantile) ? std::string("Merchantile") :
                                             ESM::Skill::sSkillNames[i]);
 
-            MWMechanics::SkillValue value = stats.getSkill(i);
+            MWMechanics::SkillValue value = npcStats.getSkill(i);
             value.setBase(int(gmst.find(name)->getFloat()));
-            stats.setSkill(i, value);
+            npcStats.setSkill(i, value);
         }
     }
 
@@ -255,7 +263,7 @@ namespace MWWorld
         return MWBase::Environment::get().getMechanicsManager()->getEnemiesNearby(getPlayer()).size() != 0;
     }
 
-    void Player::markPosition(CellStore *markedCell, ESM::Position markedPosition)
+    void Player::markPosition(CellStore *markedCell, const ESM::Position& markedPosition)
     {
         mMarkedCell = markedCell;
         mMarkedPosition = markedPosition;
@@ -276,6 +284,30 @@ namespace MWWorld
         mAutoMove = false;
         mForwardBackward = 0;
         mTeleported = false;
+        mAttackingOrSpell = false;
+        mCurrentCrimeId = -1;
+        mPaidCrimeId = -1;
+        mPreviousItems.clear();
+        mLastKnownExteriorPosition = osg::Vec3f(0,0,0);
+
+        for (int i=0; i<ESM::Skill::Length; ++i)
+        {
+            mSaveSkills[i].setBase(0);
+            mSaveSkills[i].setModifier(0);
+        }
+
+        for (int i=0; i<ESM::Attribute::Length; ++i)
+        {
+            mSaveAttributes[i].setBase(0);
+            mSaveAttributes[i].setModifier(0);
+        }
+
+        mMarkedPosition.pos[0] = 0;
+        mMarkedPosition.pos[1] = 0;
+        mMarkedPosition.pos[2] = 0;
+        mMarkedPosition.rot[0] = 0;
+        mMarkedPosition.rot[1] = 0;
+        mMarkedPosition.rot[2] = 0;
     }
 
     void Player::write (ESM::ESMWriter& writer, Loading::Listener& progress) const
@@ -310,6 +342,8 @@ namespace MWWorld
         for (int i=0; i<ESM::Skill::Length; ++i)
             mSaveSkills[i].writeState(player.mSaveSkills[i]);
 
+        player.mPreviousItems = mPreviousItems;
+
         writer.startRecord (ESM::REC_PLAY);
         player.save (writer);
         writer.endRecord (ESM::REC_PLAY);
@@ -328,6 +362,12 @@ namespace MWWorld
                 throw std::runtime_error ("invalid player state record (object state)");
             }
 
+            if (!player.mObject.mEnabled)
+            {
+                std::cerr << "Warning: Savegame attempted to disable the player." << std::endl;
+                player.mObject.mEnabled = true;
+            }
+
             mPlayer.load (player.mObject);
 
             for (int i=0; i<ESM::Attribute::Length; ++i)
@@ -337,8 +377,8 @@ namespace MWWorld
 
             if (player.mObject.mNpcStats.mWerewolfDeprecatedData && player.mObject.mNpcStats.mIsWerewolf)
             {
-                saveSkillsAttributes();
-                setWerewolfSkillsAttributes();
+                saveStats();
+                setWerewolfStats();
             }
 
             getPlayer().getClass().getCreatureStats(getPlayer()).getAiSequence().clear();
@@ -351,7 +391,7 @@ namespace MWWorld
             }
             catch (...)
             {
-                std::cerr << "Player cell '" << player.mCellId.mWorldspace << "' no longer exists" << std::endl;
+                std::cerr << "Warning: Player cell '" << player.mCellId.mWorldspace << "' no longer exists" << std::endl;
                 // Cell no longer exists. The loader will have to choose a default cell.
                 mCellStore = NULL;
             }
@@ -404,6 +444,8 @@ namespace MWWorld
             mForwardBackward = 0;
             mTeleported = false;
 
+            mPreviousItems = player.mPreviousItems;
+
             return true;
         }
 
@@ -423,5 +465,20 @@ namespace MWWorld
     int Player::getCrimeId() const
     {
         return mPaidCrimeId;
+    }
+
+    void Player::setPreviousItem(const std::string& boundItemId, const std::string& previousItemId)
+    {
+        mPreviousItems[boundItemId] = previousItemId;
+    }
+
+    std::string Player::getPreviousItem(const std::string& boundItemId)
+    {
+        return mPreviousItems[boundItemId];
+    }
+
+    void Player::erasePreviousItem(const std::string& boundItemId)
+    {
+        mPreviousItems.erase(boundItemId);
     }
 }

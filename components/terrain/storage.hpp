@@ -18,6 +18,7 @@ namespace osg
 namespace Terrain
 {
     /// We keep storage of terrain data abstract here since we need different implementations for game and editor
+    /// @note The implementation must be thread safe.
     class Storage
     {
     public:
@@ -71,13 +72,13 @@ namespace Terrain
 
         virtual float getHeightAt (const osg::Vec3f& worldPos) = 0;
 
-        virtual LayerInfo getDefaultLayer() = 0;
-
         /// Get the transformation factor for mapping cell units to world units.
         virtual float getCellWorldSize() = 0;
 
         /// Get the number of vertices on one side for each cell. Should be (power of two)+1
         virtual int getCellVertices() = 0;
+
+        virtual int getBlendmapScale(float chunkSize) = 0;
     };
 
 }

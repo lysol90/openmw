@@ -39,7 +39,7 @@ void MWWorld::LiveCellRefBase::loadImp (const ESM::ObjectState& state)
                 catch (const std::exception& exception)
                 {
                     std::cerr
-                        << "failed to load state for local script " << scriptId
+                        << "Error: failed to load state for local script " << scriptId
                         << " because an exception has been thrown: " << exception.what()
                         << std::endl;
                 }
@@ -48,6 +48,12 @@ void MWWorld::LiveCellRefBase::loadImp (const ESM::ObjectState& state)
     }
 
     mClass->readAdditionalState (ptr, state);
+
+    if (!mRef.getSoul().empty() && !MWBase::Environment::get().getWorld()->getStore().get<ESM::Creature>().search(mRef.getSoul()))
+    {
+        std::cerr << "Soul '" << mRef.getSoul() << "' not found, removing the soul from soul gem" << std::endl;
+        mRef.setSoul(std::string());
+    }
 }
 
 void MWWorld::LiveCellRefBase::saveImp (ESM::ObjectState& state) const

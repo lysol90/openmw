@@ -31,6 +31,17 @@ namespace MWGui
 
             boost::algorithm::replace_all(mText, "\r", "");
 
+            // vanilla game does not show any text after the last EOL tag.
+            const std::string lowerText = Misc::StringUtils::lowerCase(mText);
+            int brIndex = lowerText.rfind("<br>");
+            int pIndex = lowerText.rfind("<p>");
+            if (brIndex == pIndex)
+                mText = "";
+            else if (brIndex > pIndex)
+                mText = mText.substr(0, brIndex+4);
+            else
+                mText = mText.substr(0, pIndex+3);
+
             registerTag("br", Event_BrTag);
             registerTag("p", Event_PTag);
             registerTag("img", Event_ImgTag);
@@ -275,8 +286,6 @@ namespace MWGui
                 {
                     case BookTextParser::Event_ImgTag:
                     {
-                        pag.setIgnoreLeadingEmptyLines(false);
-
                         const BookTextParser::Attributes & attr = parser.getAttributes();
 
                         if (attr.find("src") == attr.end() || attr.find("width") == attr.end() || attr.find("height") == attr.end())
@@ -286,8 +295,19 @@ namespace MWGui
                         int width = MyGUI::utility::parseInt(attr.at("width"));
                         int height = MyGUI::utility::parseInt(attr.at("height"));
 
+                        bool exists;
+                        std::string correctedSrc = MWBase::Environment::get().getWindowManager()->correctBookartPath(src, width, height, &exists);
+
+                        if (!exists)
+                        {
+                            std::cerr << "Warning: Could not find \"" << src << "\" referenced by an <img> tag." << std::endl;
+                            break;
+                        }
+
+                        pag.setIgnoreLeadingEmptyLines(false);
+
                         ImageElement elem(paper, pag, mBlockStyle,
-                                          src, width, height);
+                                          correctedSrc, width, height);
                         elem.paginate();
                         break;
                     }
@@ -397,10 +417,11 @@ namespace MWGui
             MyGUI::EditBox* box = parent->createWidget<MyGUI::EditBox>("NormalText",
                 MyGUI::IntCoord(0, pag.getCurrentTop(), pag.getPageWidth(), 0), MyGUI::Align::Left | MyGUI::Align::Top,
                 parent->getName() + MyGUI::utility::toString(parent->getChildCount()));
-            box->setProperty("Static", "true");
-            box->setProperty("MultiLine", "true");
-            box->setProperty("WordWrap", "true");
-            box->setProperty("NeedMouse", "false");
+            box->setEditStatic(true);
+            box->setEditMultiLine(true);
+            box->setEditWordWrap(true);
+            box->setNeedMouseFocus(false);
+            box->setNeedKeyFocus(false);
             box->setMaxTextLength(text.size());
             box->setTextAlign(mBlockStyle.mAlign);
             box->setTextColour(mTextStyle.mColour);
@@ -428,7 +449,9 @@ namespace MWGui
         {
             // split lines
             const int lineHeight = currentFontHeight();
-            unsigned int lastLine = (mPaginator.getStartTop() + mPaginator.getPageHeight() - mPaginator.getCurrentTop()) / lineHeight;
+            unsigned int lastLine = (mPaginator.getStartTop() + mPaginator.getPageHeight() - mPaginator.getCurrentTop());
+            if (lineHeight > 0)
+                lastLine /= lineHeight;
             int ret = mPaginator.getCurrentTop() + lastLine * lineHeight;
 
             // first empty lines that would go to the next page should be ignored
@@ -469,8 +492,7 @@ namespace MWGui
                 MyGUI::IntCoord(left, pag.getCurrentTop(), width, mImageHeight), MyGUI::Align::Left | MyGUI::Align::Top,
                 parent->getName() + MyGUI::utility::toString(parent->getChildCount()));
 
-            std::string image = MWBase::Environment::get().getWindowManager()->correctBookartPath(src, width, mImageHeight);
-            mImageBox->setImageTexture(image);
+            mImageBox->setImageTexture(src);
             mImageBox->setProperty("NeedMouse", "false");
         }
 

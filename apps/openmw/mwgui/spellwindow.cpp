@@ -2,15 +2,20 @@
 
 #include <boost/format.hpp>
 
+#include <MyGUI_EditBox.h>
 #include <MyGUI_InputManager.h>
+
+#include <components/settings/settings.hpp>
 
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/player.hpp"
 
 #include "../mwmechanics/spellcasting.hpp"
 #include "../mwmechanics/spells.hpp"
@@ -34,8 +39,12 @@ namespace MWGui
 
         getWidget(mSpellView, "SpellView");
         getWidget(mEffectBox, "EffectsBox");
+        getWidget(mFilterEdit, "FilterEdit");
+
+        mFilterEdit->setUserString("IgnoreTabKey", "y");
 
         mSpellView->eventSpellClicked += MyGUI::newDelegate(this, &SpellWindow::onModelIndexSelected);
+        mFilterEdit->eventEditTextChange += MyGUI::newDelegate(this, &SpellWindow::onFilterChanged);
 
         setCoord(498, 300, 302, 300);
     }
@@ -47,6 +56,8 @@ namespace MWGui
 
     void SpellWindow::onPinToggled()
     {
+        Settings::Manager::setBool("spells pin", "Windows", mPinned);
+
         MWBase::Environment::get().getWindowManager()->setSpellVisibility(!mPinned);
     }
 
@@ -56,22 +67,24 @@ namespace MWGui
             MWBase::Environment::get().getWindowManager()->toggleVisible(GW_Magic);
     }
 
-    void SpellWindow::open()
+    void SpellWindow::onOpen()
     {
+        // Reset the filter focus when opening the window
+        MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget();
+        if (focus == mFilterEdit)
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(NULL);
+
         updateSpells();
     }
 
     void SpellWindow::onFrame(float dt) 
-    { 
-        if (mMainWidget->getVisible())
+    {
+        NoDrop::onFrame(dt);
+        mUpdateTimer += dt;
+        if (0.5f < mUpdateTimer)
         {
-            NoDrop::onFrame(dt);
-            mUpdateTimer += dt;
-            if (0.5f < mUpdateTimer)
-            {
-                mUpdateTimer = 0;
-                mSpellView->incrementalUpdate();
-            }
+            mUpdateTimer = 0;
+            mSpellView->incrementalUpdate();
         }
     }
 
@@ -79,7 +92,7 @@ namespace MWGui
     {
         mSpellIcons->updateWidgets(mEffectBox, false);
 
-        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer()));
+        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer(), mFilterEdit->getCaption()));
     }
 
     void SpellWindow::onEnchantedItemSelected(MWWorld::Ptr item, bool alreadyEquipped)
@@ -122,8 +135,15 @@ namespace MWGui
         const ESM::Spell* spell =
             MWBase::Environment::get().getWorld()->getStore().get<ESM::Spell>().find(spellId);
 
-        if (spell->mData.mFlags & ESM::Spell::F_Always
-            || spell->mData.mType == ESM::Spell::ST_Power)
+        MWWorld::Ptr player = MWMechanics::getPlayer();
+        std::string raceId = player.get<ESM::NPC>()->mBase->mRace;
+        const std::string& signId =
+            MWBase::Environment::get().getWorld()->getPlayer().getBirthSign();
+        const ESM::Race* race = MWBase::Environment::get().getWorld()->getStore().get<ESM::Race>().find(raceId);
+        const ESM::BirthSign* birthsign = MWBase::Environment::get().getWorld()->getStore().get<ESM::BirthSign>().find(signId);
+
+        // can't delete racial spells, birthsign spells or powers 
+        if (race->mPowers.exists(spell->mId) || birthsign->mPowers.exists(spell->mId) || spell->mData.mType == ESM::Spell::ST_Power)
         {
             MWBase::Environment::get().getWindowManager()->messageBox("#{sDeleteSpellError}");
         }
@@ -157,6 +177,11 @@ namespace MWGui
         }
     }
 
+    void SpellWindow::onFilterChanged(MyGUI::EditBox *sender)
+    {
+        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer(), sender->getCaption()));
+    }
+
     void SpellWindow::onSpellSelected(const std::string& spellId)
     {
         MWWorld::Ptr player = MWMechanics::getPlayer();
@@ -183,7 +208,16 @@ namespace MWGui
 
     void SpellWindow::cycle(bool next)
     {
-        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer()));
+        MWWorld::Ptr player = MWMechanics::getPlayer();
+
+        if (MWBase::Environment::get().getMechanicsManager()->isAttackingOrSpell(player))
+            return;
+
+        const MWMechanics::CreatureStats &stats = player.getClass().getCreatureStats(player);
+        if (stats.isParalyzed() || stats.getKnockedDown() || stats.isDead() || stats.getHitRecovery())
+            return;
+
+        mSpellView->setModel(new SpellModel(MWMechanics::getPlayer(), ""));
 
         SpellModel::ModelIndex selected = 0;
         for (SpellModel::ModelIndex i = 0; i<int(mSpellView->getModel()->getItemCount()); ++i)

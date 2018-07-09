@@ -152,6 +152,10 @@ namespace CSVDoc
 
             void settingChanged (const CSMPrefs::Setting *setting);
 
+            void undoActionChanged();
+
+            void redoActionChanged();
+
             void newView();
 
             void save();
@@ -223,6 +227,10 @@ namespace CSVDoc
             void addDebugProfilesSubView();
 
             void addRunLogSubView();
+
+            void addLandsSubView();
+
+            void addLandTexturesSubView();
 
             void addPathgridSubView();
 

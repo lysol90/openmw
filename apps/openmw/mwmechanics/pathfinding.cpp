@@ -5,17 +5,17 @@
 #include "../mwbase/world.hpp"
 #include "../mwbase/environment.hpp"
 
-#include "../mwworld/esmstore.hpp"
 #include "../mwworld/cellstore.hpp"
 
+#include "pathgrid.hpp"
 #include "coordinateconverter.hpp"
 
 namespace
 {
     // Chooses a reachable end pathgrid point.  start is assumed reachable.
     std::pair<int, bool> getClosestReachablePoint(const ESM::Pathgrid* grid,
-                                                  const MWWorld::CellStore *cell,
-                                                  const osg::Vec3f pos, int start)
+                                                  const MWMechanics::PathgridGraph *graph,
+                                                  const osg::Vec3f& pos, int start)
     {
         assert(grid && !grid->mPoints.empty());
 
@@ -31,7 +31,7 @@ namespace
             if (potentialDistBetween < closestDistanceReachable)
             {
                 // found a closer one
-                if (cell->isPointConnected(start, counter))
+                if (graph->isPointConnected(start, counter))
                 {
                     closestDistanceReachable = potentialDistBetween;
                     closestReachableIndex = counter;
@@ -45,7 +45,7 @@ namespace
         }
 
         // post-condition: start and endpoint must be connected
-        assert(cell->isPointConnected(start, closestReachableIndex));
+        assert(graph->isPointConnected(start, closestReachableIndex));
 
         // AiWander has logic that depends on whether a path was created, deleting
         // allowed nodes if not.  Hence a path needs to be created even if the start
@@ -120,8 +120,8 @@ namespace MWMechanics
     }
 
     PathFinder::PathFinder()
-        : mPathgrid(NULL),
-          mCell(NULL)
+        : mPathgrid(NULL)
+        , mCell(NULL)
     {
     }
 
@@ -139,7 +139,7 @@ namespace MWMechanics
      * NOTE: It may be desirable to simply go directly to the endPoint if for
      *       example there are no pathgrids in this cell.
      *
-     * NOTE: startPoint & endPoint are in world co-ordinates
+     * NOTE: startPoint & endPoint are in world coordinates
      *
      * Updates mPath using aStarSearch() or ray test (if shortcut allowed).
      * mPath consists of pathgrid points, except the last element which is
@@ -148,7 +148,7 @@ namespace MWMechanics
      * pathgrid point (e.g. wander) then it may be worth while to call
      * pop_back() to remove the redundant entry.
      *
-     * NOTE: co-ordinates must be converted prior to calling GetClosestPoint()
+     * NOTE: coordinates must be converted prior to calling GetClosestPoint()
      *
      *    |
      *    |       cell
@@ -164,19 +164,20 @@ namespace MWMechanics
      *    +-----------------------------
      *
      *    i = x value of cell itself (multiply by ESM::Land::REAL_SIZE to convert)
-     *    j = @.x in local co-ordinates (i.e. within the cell)
-     *    k = @.x in world co-ordinates
+     *    j = @.x in local coordinates (i.e. within the cell)
+     *    k = @.x in world coordinates
      */
     void PathFinder::buildPath(const ESM::Pathgrid::Point &startPoint,
                                const ESM::Pathgrid::Point &endPoint,
-                               const MWWorld::CellStore* cell)
+                               const MWWorld::CellStore* cell, const PathgridGraph& pathgridGraph)
     {
         mPath.clear();
 
+        // TODO: consider removing mCell / mPathgrid in favor of mPathgridGraph
         if(mCell != cell || !mPathgrid)
         {
             mCell = cell;
-            mPathgrid = MWBase::Environment::get().getWorld()->getStore().get<ESM::Pathgrid>().search(*mCell->getCell());
+            mPathgrid = pathgridGraph.getPathgrid();
         }
 
         // Refer to AiWander reseach topic on openmw forums for some background.
@@ -188,7 +189,7 @@ namespace MWMechanics
             return;
         }
 
-        // NOTE: GetClosestPoint expects local co-ordinates
+        // NOTE: GetClosestPoint expects local coordinates
         CoordinateConverter converter(mCell->getCell());
 
         // NOTE: It is possible that GetClosestPoint returns a pathgrind point index
@@ -200,7 +201,7 @@ namespace MWMechanics
         int startNode = GetClosestPoint(mPathgrid, startPointInLocalCoords);
 
         osg::Vec3f endPointInLocalCoords(converter.toLocalVec3(endPoint));
-        std::pair<int, bool> endNode = getClosestReachablePoint(mPathgrid, cell,
+        std::pair<int, bool> endNode = getClosestReachablePoint(mPathgrid, &pathgridGraph,
             endPointInLocalCoords,
                 startNode);
 
@@ -228,9 +229,9 @@ namespace MWMechanics
         }
         else
         {
-            mPath = mCell->aStarSearch(startNode, endNode.first);
+            mPath = pathgridGraph.aStarSearch(startNode, endNode.first);
 
-            // convert supplied path to world co-ordinates
+            // convert supplied path to world coordinates
             for (std::list<ESM::Pathgrid::Point>::iterator iter(mPath.begin()); iter != mPath.end(); ++iter)
             {
                 converter.toWorld(*iter);
@@ -301,21 +302,21 @@ namespace MWMechanics
     // see header for the rationale
     void PathFinder::buildSyncedPath(const ESM::Pathgrid::Point &startPoint,
         const ESM::Pathgrid::Point &endPoint,
-        const MWWorld::CellStore* cell)
+        const MWWorld::CellStore* cell, const MWMechanics::PathgridGraph& pathgridGraph)
     {
         if (mPath.size() < 2)
         {
             // if path has one point, then it's the destination.
             // don't need to worry about bad path for this case
-            buildPath(startPoint, endPoint, cell);
+            buildPath(startPoint, endPoint, cell, pathgridGraph);
         }
         else
         {
             const ESM::Pathgrid::Point oldStart(*getPath().begin());
-            buildPath(startPoint, endPoint, cell);
+            buildPath(startPoint, endPoint, cell, pathgridGraph);
             if (mPath.size() >= 2)
             {
-                // if 2nd waypoint of new path == 1st waypoint of old, 
+                // if 2nd waypoint of new path == 1st waypoint of old,
                 // delete 1st waypoint of new path.
                 std::list<ESM::Pathgrid::Point>::iterator iter = ++mPath.begin();
                 if (iter->mX == oldStart.mX

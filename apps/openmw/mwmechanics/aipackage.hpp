@@ -27,12 +27,13 @@ namespace MWMechanics
     const float AI_REACTION_TIME = 0.25f;
 
     class CharacterController;
+    class PathgridGraph;
 
     /// \brief Base class for AI packages
     class AiPackage
     {
         public:
-            ///Enumerates the various AITypes availible.
+            ///Enumerates the various AITypes available
             enum TypeId {
                 TypeIdNone = -1,
                 TypeIdWander = 0,
@@ -41,12 +42,14 @@ namespace MWMechanics
                 TypeIdFollow = 3,
                 TypeIdActivate = 4,
 
-                // These 4 are not really handled as Ai Packages in the MW engine
+                // These 5 are not really handled as Ai Packages in the MW engine
                 // For compatibility do *not* return these in the getCurrentAiPackage script function..
                 TypeIdCombat = 5,
                 TypeIdPursue = 6,
                 TypeIdAvoidDoor = 7,
-                TypeIdFace = 8
+                TypeIdFace = 8,
+                TypeIdBreathe = 9,
+                TypeIdInternalTravel = 10
             };
 
             ///Default constructor
@@ -76,6 +79,9 @@ namespace MWMechanics
 
             /// Get the target actor the AI is targeted at (not applicable to all AI packages, default return empty Ptr)
             virtual MWWorld::Ptr getTarget() const;
+
+            /// Get the destination point of the AI package (not applicable to all AI packages, default return (0, 0, 0))
+            virtual osg::Vec3f getDestination(const MWWorld::Ptr& actor) const { return osg::Vec3f(0, 0, 0); };
 
             /// Return true if having this AiPackage makes the actor side with the target in fights (default false)
             virtual bool sideWithTarget() const;
@@ -109,7 +115,7 @@ namespace MWMechanics
             /// If a shortcut is possible then path will be cleared and filled with the destination point.
             /// \param destInLOS If not NULL function will return ray cast check result
             /// \return If can shortcut the path
-            bool shortcutPath(const ESM::Pathgrid::Point& startPoint, const ESM::Pathgrid::Point& endPoint, const MWWorld::Ptr& actor, bool *destInLOS);
+            bool shortcutPath(const ESM::Pathgrid::Point& startPoint, const ESM::Pathgrid::Point& endPoint, const MWWorld::Ptr& actor, bool *destInLOS, bool isPathClear);
 
             /// Check if the way to the destination is clear, taking into account actor speed
             bool checkWayIsClearForActor(const ESM::Pathgrid::Point& startPoint, const ESM::Pathgrid::Point& endPoint, const MWWorld::Ptr& actor);
@@ -117,12 +123,18 @@ namespace MWMechanics
             virtual bool doesPathNeedRecalc(const ESM::Pathgrid::Point& newDest, const MWWorld::CellStore* currentCell);
 
             void evadeObstacles(const MWWorld::Ptr& actor, float duration, const ESM::Position& pos);
+            void openDoors(const MWWorld::Ptr& actor);
+
+            const PathgridGraph& getPathGridGraph(const MWWorld::CellStore* cell);
 
             // TODO: all this does not belong here, move into temporary storage
             PathFinder mPathFinder;
             ObstacleCheck mObstacleCheck;
 
             float mTimer;
+
+            std::string mTargetActorRefId;
+            mutable int mTargetActorId;
 
             osg::Vec3f mLastActorPos;
 

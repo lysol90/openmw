@@ -193,10 +193,18 @@ namespace MWScript
                     Interpreter::Type_Integer time = static_cast<Interpreter::Type_Integer>(runtime[0].mFloat);
                     runtime.pop();
 
+                    // Chance for Idle is unused
+                    if (arg0)
+                    {
+                        --arg0;
+                        runtime.pop();
+                    }
+
                     std::vector<unsigned char> idleList;
                     bool repeat = false;
 
-                    for(int i=1; i < 10 && arg0; ++i)
+                    // Chances for Idle2-Idle9
+                    for(int i=2; i<=9 && arg0; ++i)
                     {
                         if(!repeat)
                             repeat = true;
@@ -372,21 +380,14 @@ namespace MWScript
 
                 virtual void execute (Interpreter::Runtime& runtime)
                 {
-                    MWWorld::Ptr observer = R()(runtime);
+                    MWWorld::Ptr observer = R()(runtime, false); // required=false
+
                     std::string actorID = runtime.getStringLiteral (runtime[0].mInteger);
                     runtime.pop();
 
                     MWWorld::Ptr actor = MWBase::Environment::get().getWorld()->getPtr(actorID, true);
 
-                    if(!actor.getClass().isActor() || !observer.getClass().isActor())
-                    {
-                        runtime.push(0);
-                        return;
-                    }
-
-                    Interpreter::Type_Integer value =
-                            MWBase::Environment::get().getWorld()->getLOS(observer, actor) &&
-                            MWBase::Environment::get().getMechanicsManager()->awarenessCheck(actor, observer);
+                    Interpreter::Type_Integer value = MWBase::Environment::get().getMechanicsManager()->isActorDetected(actor, observer);
 
                     runtime.push (value);
                 }

@@ -14,6 +14,8 @@ namespace MWWorld
 
 namespace MWMechanics
 {
+    class PathgridGraph;
+
     float distance(const ESM::Pathgrid::Point& point, float x, float y, float);
     float distance(const ESM::Pathgrid::Point& a, const ESM::Pathgrid::Point& b);
     float getZAngleToDir(const osg::Vec3f& dir);
@@ -54,7 +56,7 @@ namespace MWMechanics
             void clearPath();
 
             void buildPath(const ESM::Pathgrid::Point &startPoint, const ESM::Pathgrid::Point &endPoint,
-                           const MWWorld::CellStore* cell);
+                           const MWWorld::CellStore* cell, const PathgridGraph& pathgridGraph);
 
             bool checkPathCompleted(float x, float y, float tolerance = PathTolerance);
             ///< \Returns true if we are within \a tolerance units of the last path point.
@@ -84,12 +86,12 @@ namespace MWMechanics
             /** Synchronize new path with old one to avoid visiting 1 waypoint 2 times
             @note
                 BuildPath() takes closest PathGrid point to NPC as first point of path.
-                This is undesireable if NPC has just passed a Pathgrid point, as this
+                This is undesirable if NPC has just passed a Pathgrid point, as this
                 makes the 2nd point of the new path == the 1st point of old path.
                 Which results in NPC "running in a circle" back to the just passed waypoint.
              */
             void buildSyncedPath(const ESM::Pathgrid::Point &startPoint, const ESM::Pathgrid::Point &endPoint,
-                const MWWorld::CellStore* cell);
+                const MWWorld::CellStore* cell, const PathgridGraph& pathgridGraph);
 
             void addPointToPath(const ESM::Pathgrid::Point &point)
             {
@@ -122,11 +124,11 @@ namespace MWMechanics
                 return (MWMechanics::PathFinder::MakeOsgVec3(point) - pos).length2();
             }
 
-            // Return the closest pathgrid point index from the specified position co
-            // -ordinates.  NOTE: Does not check if there is a sensible way to get there
+            // Return the closest pathgrid point index from the specified position
+            // coordinates.  NOTE: Does not check if there is a sensible way to get there
             // (e.g. a cliff in front).
             //
-            // NOTE: pos is expected to be in local co-ordinates, as is grid->mPoints
+            // NOTE: pos is expected to be in local coordinates, as is grid->mPoints
             //
             static int GetClosestPoint(const ESM::Pathgrid* grid, const osg::Vec3f& pos)
             {

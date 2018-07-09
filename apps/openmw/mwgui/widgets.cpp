@@ -105,7 +105,7 @@ namespace MWGui
             assignWidget(button, "StatValueButton");
             if (button)
             {
-                mSkillNameWidget = button;
+                mSkillValueWidget = button;
                 button->eventMouseButtonClick += MyGUI::newDelegate(this, &MWSkill::onClicked);
             }
         }
@@ -502,10 +502,9 @@ namespace MWGui
 
             if (mBarWidget)
             {
-                mBarWidget->setProgressRange(mMax);
-                mBarWidget->setProgressPosition(mValue);
+                mBarWidget->setProgressRange(std::max(0, mMax));
+                mBarWidget->setProgressPosition(std::max(0, mValue));
             }
-
 
             if (mBarTextWidget)
             {
@@ -534,10 +533,10 @@ namespace MWGui
         }
 
         MWScrollBar::MWScrollBar()
-            : mEnableRepeat(true)
-            , mRepeatTriggerTime(0.5f)
-            , mRepeatStepTime(0.1f)
-            , mIsIncreasing(true)
+          : mEnableRepeat(true)
+          , mRepeatTriggerTime(0.5f)
+          , mRepeatStepTime(0.1f)
+          , mIsIncreasing(true)
         {
 #if MYGUI_VERSION >= MYGUI_DEFINE_VERSION(3,2,2)
             ScrollBar::setRepeatEnabled(false);

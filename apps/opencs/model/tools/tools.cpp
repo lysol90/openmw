@@ -61,12 +61,7 @@ CSMDoc::OperationHolder *CSMTools::Tools::getVerifier()
         connect (&mVerifier, SIGNAL (reportMessage (const CSMDoc::Message&, int)),
             this, SLOT (verifierMessage (const CSMDoc::Message&, int)));
 
-        std::vector<std::string> mandatoryIds; //  I want C++11, damn it!
-        mandatoryIds.push_back ("Day");
-        mandatoryIds.push_back ("DaysPassed");
-        mandatoryIds.push_back ("GameHour");
-        mandatoryIds.push_back ("Month");
-        mandatoryIds.push_back ("PCRace");
+        std::vector<std::string> mandatoryIds {"Day", "DaysPassed", "GameHour", "Month", "PCRace"};
 
         mVerifierOperation->appendStage (new MandatoryIdStage (mData.getGlobals(),
             CSMWorld::UniversalId (CSMWorld::UniversalId::Type_Globals), mandatoryIds));
@@ -216,7 +211,7 @@ void CSMTools::Tools::runSearch (const CSMWorld::UniversalId& searchId, const Se
     mSearch.start();
 }
 
-void CSMTools::Tools::runMerge (std::auto_ptr<CSMDoc::Document> target)
+void CSMTools::Tools::runMerge (std::unique_ptr<CSMDoc::Document> target)
 {
     // not setting an active report, because merge does not produce messages
 
@@ -230,7 +225,7 @@ void CSMTools::Tools::runMerge (std::auto_ptr<CSMDoc::Document> target)
 
     target->flagAsDirty();
 
-    mMergeOperation->setTarget (target);
+    mMergeOperation->setTarget (std::move(target));
 
     mMerge.start();
 }

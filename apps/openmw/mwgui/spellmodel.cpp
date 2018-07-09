@@ -2,8 +2,6 @@
 
 #include <iostream>
 
-#include <boost/lexical_cast.hpp>
-
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
@@ -34,10 +32,14 @@ namespace
 namespace MWGui
 {
 
+    SpellModel::SpellModel(const MWWorld::Ptr &actor, const std::string& filter)
+        : mActor(actor), mFilter(filter)
+    {
+    }
+
     SpellModel::SpellModel(const MWWorld::Ptr &actor)
         : mActor(actor)
     {
-
     }
 
     void SpellModel::update()
@@ -50,10 +52,17 @@ namespace MWGui
         const MWWorld::ESMStore &esmStore =
             MWBase::Environment::get().getWorld()->getStore();
 
+        std::string filter = Misc::StringUtils::lowerCaseUtf8(mFilter);
+
         for (MWMechanics::Spells::TIterator it = spells.begin(); it != spells.end(); ++it)
         {
             const ESM::Spell* spell = it->first;
             if (spell->mData.mType != ESM::Spell::ST_Power && spell->mData.mType != ESM::Spell::ST_Spell)
+                continue;
+
+            std::string name = Misc::StringUtils::lowerCaseUtf8(spell->mName);
+
+            if (name.find(filter) == std::string::npos)
                 continue;
 
             Spell newSpell;
@@ -61,8 +70,8 @@ namespace MWGui
             if (spell->mData.mType == ESM::Spell::ST_Spell)
             {
                 newSpell.mType = Spell::Type_Spell;
-                std::string cost = boost::lexical_cast<std::string>(spell->mData.mCost);
-                std::string chance = boost::lexical_cast<std::string>(int(MWMechanics::getSpellSuccessChance(spell, mActor)));
+                std::string cost = std::to_string(spell->mData.mCost);
+                std::string chance = std::to_string(int(MWMechanics::getSpellSuccessChance(spell, mActor, NULL, true, true)));
                 newSpell.mCostColumn = cost + "/" + chance;
             }
             else
@@ -84,11 +93,16 @@ namespace MWGui
             const ESM::Enchantment* enchant = esmStore.get<ESM::Enchantment>().search(enchantId);
             if (!enchant)
             {
-                std::cerr << "Can't find enchantment '" << enchantId << "' on item " << item.getCellRef().getRefId() << std::endl;
+                std::cerr << "Warning: Can't find enchantment '" << enchantId << "' on item " << item.getCellRef().getRefId() << std::endl;
                 continue;
             }
 
             if (enchant->mData.mType != ESM::Enchantment::WhenUsed && enchant->mData.mType != ESM::Enchantment::CastOnce)
+                continue;
+
+            std::string name = Misc::StringUtils::lowerCaseUtf8(item.getClass().getName(item));
+
+            if (name.find(filter) == std::string::npos)
                 continue;
 
             Spell newSpell;
@@ -112,11 +126,11 @@ namespace MWGui
 
                 int castCost = MWMechanics::getEffectiveEnchantmentCastCost(static_cast<float>(enchant->mData.mCost), mActor);
 
-                std::string cost = boost::lexical_cast<std::string>(castCost);
+                std::string cost = std::to_string(castCost);
                 int currentCharge = int(item.getCellRef().getEnchantmentCharge());
                 if (currentCharge ==  -1)
                     currentCharge = enchant->mData.mCharge;
-                std::string charge = boost::lexical_cast<std::string>(currentCharge);
+                std::string charge = std::to_string(currentCharge);
                 newSpell.mCostColumn = cost + "/" + charge;
 
                 newSpell.mActive = invStore.isEquipped(item);

@@ -1,8 +1,11 @@
 #include "characterpreview.hpp"
 
+#include <cmath>
 #include <iostream>
 
+#include <osg/Material>
 #include <osg/Fog>
+#include <osg/BlendFunc>
 #include <osg/Texture2D>
 #include <osg/Camera>
 #include <osg/PositionAttitudeTransform>
@@ -11,6 +14,7 @@
 #include <osgUtil/IntersectionVisitor>
 #include <osgUtil/LineSegmentIntersector>
 
+#include <components/fallback/fallback.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 
 #include "../mwbase/environment.hpp"
@@ -42,7 +46,16 @@ namespace MWRender
                 mRendered = true;
 
                 mLastRenderedFrame = nv->getTraversalNumber();
+
+                osg::ref_ptr<osg::FrameStamp> previousFramestamp = const_cast<osg::FrameStamp*>(nv->getFrameStamp());
+                osg::FrameStamp* fs = new osg::FrameStamp(*previousFramestamp);
+                fs->setSimulationTime(0.0);
+
+                nv->setFrameStamp(fs);
+
                 traverse(node, nv);
+
+                nv->setFrameStamp(previousFramestamp);
             }
             else
             {
@@ -65,14 +78,42 @@ namespace MWRender
         unsigned int mLastRenderedFrame;
     };
 
+
+    // Set up alpha blending to Additive mode to avoid issues caused by transparent objects writing onto the alpha value of the FBO
+    class SetUpBlendVisitor : public osg::NodeVisitor
+    {
+    public:
+        SetUpBlendVisitor(): osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
+        {
+        }
+
+        virtual void apply(osg::Node& node)
+        {
+            if (osg::StateSet* stateset = node.getStateSet())
+            {
+                if (stateset->getAttribute(osg::StateAttribute::BLENDFUNC) || stateset->getBinNumber() == osg::StateSet::TRANSPARENT_BIN)
+                {
+                    osg::ref_ptr<osg::StateSet> newStateSet = new osg::StateSet(*stateset, osg::CopyOp::SHALLOW_COPY);
+                    osg::BlendFunc* blendFunc = static_cast<osg::BlendFunc*>(stateset->getAttribute(osg::StateAttribute::BLENDFUNC));
+                    osg::ref_ptr<osg::BlendFunc> newBlendFunc = blendFunc ? new osg::BlendFunc(*blendFunc) : new osg::BlendFunc;
+                    newBlendFunc->setDestinationAlpha(osg::BlendFunc::ONE);
+                    newStateSet->setAttribute(newBlendFunc, osg::StateAttribute::ON);
+                    node.setStateSet(newStateSet);
+                }
+
+            }
+            traverse(node);
+        }
+    };
+
     CharacterPreview::CharacterPreview(osg::Group* parent, Resource::ResourceSystem* resourceSystem,
-                                       MWWorld::Ptr character, int sizeX, int sizeY, const osg::Vec3f& position, const osg::Vec3f& lookAt)
+                                       const MWWorld::Ptr& character, int sizeX, int sizeY, const osg::Vec3f& position, const osg::Vec3f& lookAt)
         : mParent(parent)
         , mResourceSystem(resourceSystem)
         , mPosition(position)
         , mLookAt(lookAt)
         , mCharacter(character)
-        , mAnimation(NULL)
+        , mAnimation(nullptr)
         , mSizeX(sizeX)
         , mSizeY(sizeY)
     {
@@ -93,6 +134,8 @@ namespace MWRender
         mCamera->setViewport(0, 0, sizeX, sizeY);
         mCamera->setRenderOrder(osg::Camera::PRE_RENDER);
         mCamera->attach(osg::Camera::COLOR_BUFFER, mTexture);
+        mCamera->setName("CharacterPreview");
+        mCamera->setComputeNearFarMode(osg::Camera::COMPUTE_NEAR_FAR_USING_BOUNDING_VOLUMES);
 
         mCamera->setNodeMask(Mask_RenderToTexture);
 
@@ -102,6 +145,13 @@ namespace MWRender
         stateset->setMode(GL_LIGHTING, osg::StateAttribute::ON);
         stateset->setMode(GL_NORMALIZE, osg::StateAttribute::ON);
         stateset->setMode(GL_CULL_FACE, osg::StateAttribute::ON);
+        osg::ref_ptr<osg::Material> defaultMat (new osg::Material);
+        defaultMat->setColorMode(osg::Material::OFF);
+        defaultMat->setAmbient(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+        defaultMat->setDiffuse(osg::Material::FRONT_AND_BACK, osg::Vec4f(1,1,1,1));
+        defaultMat->setSpecular(osg::Material::FRONT_AND_BACK, osg::Vec4f(0.f, 0.f, 0.f, 0.f));
+        stateset->setAttribute(defaultMat);
+
         // assign large value to effectively turn off fog
         // shaders don't respect glDisable(GL_FOG)
         osg::ref_ptr<osg::Fog> fog (new osg::Fog);
@@ -110,14 +160,25 @@ namespace MWRender
         stateset->setAttributeAndModes(fog, osg::StateAttribute::OFF|osg::StateAttribute::OVERRIDE);
 
         osg::ref_ptr<osg::LightModel> lightmodel = new osg::LightModel;
-        lightmodel->setAmbientIntensity(osg::Vec4(0.25, 0.25, 0.25, 1.0));
+        lightmodel->setAmbientIntensity(osg::Vec4(0.0, 0.0, 0.0, 1.0));
         stateset->setAttributeAndModes(lightmodel, osg::StateAttribute::ON);
 
-        /// \todo Read the fallback values from INIImporter (Inventory:Directional*) ?
         osg::ref_ptr<osg::Light> light = new osg::Light;
-        light->setPosition(osg::Vec4(-0.3,0.3,0.7, 0.0));
-        light->setDiffuse(osg::Vec4(1,1,1,1));
-        light->setAmbient(osg::Vec4(0,0,0,1));
+        const Fallback::Map* fallback = MWBase::Environment::get().getWorld()->getFallback();
+        float diffuseR = fallback->getFallbackFloat("Inventory_DirectionalDiffuseR");
+        float diffuseG = fallback->getFallbackFloat("Inventory_DirectionalDiffuseG");
+        float diffuseB = fallback->getFallbackFloat("Inventory_DirectionalDiffuseB");
+        float ambientR = fallback->getFallbackFloat("Inventory_DirectionalAmbientR");
+        float ambientG = fallback->getFallbackFloat("Inventory_DirectionalAmbientG");
+        float ambientB = fallback->getFallbackFloat("Inventory_DirectionalAmbientB");
+        float azimuth = osg::DegreesToRadians(180.f - fallback->getFallbackFloat("Inventory_DirectionalRotationX"));
+        float altitude = osg::DegreesToRadians(fallback->getFallbackFloat("Inventory_DirectionalRotationY"));
+        float positionX = std::cos(azimuth) * std::sin(altitude);
+        float positionY = std::sin(azimuth) * std::sin(altitude);
+        float positionZ = std::cos(altitude);
+        light->setPosition(osg::Vec4(positionX,positionY,positionZ, 0.0));
+        light->setDiffuse(osg::Vec4(diffuseR,diffuseG,diffuseB,1));
+        light->setAmbient(osg::Vec4(ambientR,ambientG,ambientB,1));
         light->setSpecular(osg::Vec4(0,0,0,0));
         light->setLightNum(0);
         light->setConstantAttenuation(1.f);
@@ -141,7 +202,7 @@ namespace MWRender
 
         mParent->addChild(mCamera);
 
-        mCharacter.mCell = NULL;
+        mCharacter.mCell = nullptr;
     }
 
     CharacterPreview::~CharacterPreview ()
@@ -160,8 +221,15 @@ namespace MWRender
         return mSizeY;
     }
 
+    void CharacterPreview::setBlendMode()
+    {
+        SetUpBlendVisitor visitor;
+        mNode->accept(visitor);
+    }
+
     void CharacterPreview::onSetup()
     {
+        setBlendMode();
     }
 
     osg::ref_ptr<osg::Texture2D> CharacterPreview::getTexture()
@@ -171,10 +239,10 @@ namespace MWRender
 
     void CharacterPreview::rebuild()
     {
-        mAnimation.reset(NULL);
+        mAnimation = NULL;
 
-        mAnimation.reset(new NpcAnimation(mCharacter, mNode, mResourceSystem, true, true,
-                                      (renderHeadOnly() ? NpcAnimation::VM_HeadOnly : NpcAnimation::VM_Normal)));
+        mAnimation = new NpcAnimation(mCharacter, mNode, mResourceSystem, true,
+                                      (renderHeadOnly() ? NpcAnimation::VM_HeadOnly : NpcAnimation::VM_Normal));
 
         onSetup();
 
@@ -183,14 +251,14 @@ namespace MWRender
 
     void CharacterPreview::redraw()
     {
-        mCamera->setNodeMask(~0);
+        mCamera->setNodeMask(Mask_RenderToTexture);
         mDrawOnceCallback->redrawNextFrame();
     }
 
     // --------------------------------------------------------------------------------------------------
 
 
-    InventoryPreview::InventoryPreview(osg::Group* parent, Resource::ResourceSystem* resourceSystem, MWWorld::Ptr character)
+    InventoryPreview::InventoryPreview(osg::Group* parent, Resource::ResourceSystem* resourceSystem, const MWWorld::Ptr& character)
         : CharacterPreview(parent, resourceSystem, character, 512, 1024, osg::Vec3f(0, 700, 71), osg::Vec3f(0,0,71))
     {
     }
@@ -200,7 +268,11 @@ namespace MWRender
         sizeX = std::max(sizeX, 0);
         sizeY = std::max(sizeY, 0);
 
-        mCamera->setViewport(0, mSizeY-sizeY, std::min(mSizeX, sizeX), std::min(mSizeY, sizeY));
+        // NB Camera::setViewport has threading issues
+        osg::ref_ptr<osg::StateSet> stateset = new osg::StateSet;
+        mViewport = new osg::Viewport(0, mSizeY-sizeY, std::min(mSizeX, sizeX), std::min(mSizeY, sizeY));
+        stateset->setAttributeAndModes(mViewport);
+        mCamera->setStateSet(stateset);
 
         redraw();
     }
@@ -258,7 +330,7 @@ namespace MWRender
         mCurrentAnimGroup = groupname;
         mAnimation->play(mCurrentAnimGroup, 1, Animation::BlendMask_All, false, 1.0f, "start", "stop", 0.0f, 0);
 
-        MWWorld::ContainerStoreIterator torch = inv.getSlot(MWWorld::InventoryStore::Slot_CarriedLeft);
+        MWWorld::ConstContainerStoreIterator torch = inv.getSlot(MWWorld::InventoryStore::Slot_CarriedLeft);
         if(torch != inv.end() && torch->getTypeName() == typeid(ESM::Light).name() && showCarriedLeft)
         {
             if(!mAnimation->getInfo("torch"))
@@ -270,13 +342,17 @@ namespace MWRender
 
         mAnimation->runAnimation(0.0f);
 
+        setBlendMode();
+
         redraw();
     }
 
     int InventoryPreview::getSlotSelected (int posX, int posY)
     {
-        float projX = (posX / mCamera->getViewport()->width()) * 2 - 1.f;
-        float projY = (posY / mCamera->getViewport()->height()) * 2 - 1.f;
+        if (!mViewport)
+            return -1;
+        float projX = (posX / mViewport->width()) * 2 - 1.f;
+        float projY = (posY / mViewport->height()) * 2 - 1.f;
         // With Intersector::WINDOW, the intersection ratios are slightly inaccurate. Seems to be a
         // precision issue - compiling with OSG_USE_FLOAT_MATRIX=0, Intersector::WINDOW works ok.
         // Using Intersector::PROJECTION results in better precision because the start/end points and the model matrices
@@ -309,6 +385,7 @@ namespace MWRender
 
     void InventoryPreview::onSetup()
     {
+        CharacterPreview::onSetup();
         osg::Vec3f scale (1.f, 1.f, 1.f);
         mCharacter.getClass().adjustScale(mCharacter, scale, true);
 
@@ -382,6 +459,7 @@ namespace MWRender
 
     void RaceSelectionPreview::onSetup ()
     {
+        CharacterPreview::onSetup();
         mAnimation->play("idle", 1, Animation::BlendMask_All, false, 1.0f, "start", "stop", 0.0f, 0);
         mAnimation->runAnimation(0.f);
 

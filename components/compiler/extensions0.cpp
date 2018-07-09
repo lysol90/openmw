@@ -240,7 +240,7 @@ namespace Compiler
         void registerExtensions (Extensions& extensions)
         {
             extensions.registerFunction ("xbox", 'l', "", opcodeXBox);
-            extensions.registerFunction ("onactivate", 'l', "", opcodeOnActivate);
+            extensions.registerFunction ("onactivate", 'l', "", opcodeOnActivate, opcodeOnActivateExplicit);
             extensions.registerInstruction ("activate", "x", opcodeActivate, opcodeActivateExplicit);
             extensions.registerInstruction ("lock", "/l", opcodeLock, opcodeLockExplicit);
             extensions.registerInstruction ("unlock", "", opcodeUnlock, opcodeUnlockExplicit);
@@ -312,10 +312,14 @@ namespace Compiler
             extensions.registerInstruction ("betacomment", "/S", opcodeBetaComment, opcodeBetaCommentExplicit);
             extensions.registerInstruction ("bc", "/S", opcodeBetaComment, opcodeBetaCommentExplicit);
             extensions.registerInstruction ("ori", "/S", opcodeBetaComment, opcodeBetaCommentExplicit); // 'ori' stands for 'ObjectReferenceInfo'
+            extensions.registerInstruction ("showscenegraph", "/l", opcodeShowSceneGraph, opcodeShowSceneGraphExplicit);
+            extensions.registerInstruction ("ssg", "/l", opcodeShowSceneGraph, opcodeShowSceneGraphExplicit);
             extensions.registerInstruction ("addtolevcreature", "ccl", opcodeAddToLevCreature);
             extensions.registerInstruction ("removefromlevcreature", "ccl", opcodeRemoveFromLevCreature);
             extensions.registerInstruction ("addtolevitem", "ccl", opcodeAddToLevItem);
             extensions.registerInstruction ("removefromlevitem", "ccl", opcodeRemoveFromLevItem);
+            extensions.registerInstruction ("tb", "", opcodeToggleBorders);
+            extensions.registerInstruction ("toggleborders", "", opcodeToggleBorders);
         }
     }
 
